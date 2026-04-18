@@ -757,8 +757,8 @@ def plot_one_sample_results(data, result, mu0):
                  color=gold, fontfamily='monospace', fontweight='bold',
                  transform=ax2.transAxes)
         y_pos -= 0.13
-        ax2.axhline(y=y_pos + 0.03, xmin=0.05, xmax=0.95, color='#2a2a2a',
-                    linewidth=0.5, transform=ax2.transAxes)
+        ax2.plot([0.05, 0.95], [y_pos + 0.03, y_pos + 0.03],
+                 color='#2a2a2a', linewidth=0.5, transform=ax2.transAxes)
     rect = FancyBboxPatch((0.03, 0.03), 0.94, 0.94, boxstyle="round,pad=0.02",
                           lw=1, edgecolor=clr, facecolor='none',
                           transform=ax2.transAxes)
@@ -864,8 +864,8 @@ def plot_paired_results(group1, group2, result, label1='Group 1', label2='Group 
         ax2.text(0.92, y_pos, val, ha='right', va='top', fontsize=9,
                  color=gold, fontfamily='monospace', fontweight='bold', transform=ax2.transAxes)
         y_pos -= 0.13
-        ax2.axhline(y=y_pos + 0.03, xmin=0.05, xmax=0.95, color='#2a2a2a',
-                    linewidth=0.5, transform=ax2.transAxes)
+        ax2.plot([0.05, 0.95], [y_pos + 0.03, y_pos + 0.03],
+                 color='#2a2a2a', linewidth=0.5, transform=ax2.transAxes)
     rect = FancyBboxPatch((0.03, 0.03), 0.94, 0.94, boxstyle="round,pad=0.02",
                           lw=1, edgecolor=clr, facecolor='none', transform=ax2.transAxes)
     ax2.add_patch(rect)
@@ -966,8 +966,8 @@ def plot_independent_results(group1, group2, result, label1='Group 1', label2='G
         ax2.text(0.92, y_pos, val, ha='right', va='top', fontsize=9,
                  color=gold, fontfamily='monospace', fontweight='bold', transform=ax2.transAxes)
         y_pos -= 0.13
-        ax2.axhline(y=y_pos + 0.03, xmin=0.05, xmax=0.95, color='#2a2a2a',
-                    linewidth=0.5, transform=ax2.transAxes)
+        ax2.plot([0.05, 0.95], [y_pos + 0.03, y_pos + 0.03],
+                 color='#2a2a2a', linewidth=0.5, transform=ax2.transAxes)
     rect = FancyBboxPatch((0.03, 0.03), 0.94, 0.94, boxstyle="round,pad=0.02",
                           lw=1, edgecolor=clr, facecolor='none', transform=ax2.transAxes)
     ax2.add_patch(rect)
