@@ -113,7 +113,7 @@ SAMPLES = {
 13,76
 14,89
 15,80""",
-        "desc": "Test whether the mean **score** differs from a known population value (μ₀). Select the `score` column as variable.",
+        "desc": "Test whether the mean <b>score</b> differs from a known population value (μ₀). Select the `score` column as variable.",
         "cols": ["subject_id", "score"],
         "note": "One numeric column required. Set your test value (μ₀) in the sidebar."
     },
@@ -134,7 +134,7 @@ SAMPLES = {
 13,69,75
 14,73,80
 15,67,72""",
-        "desc": "Test whether the mean difference between **pre_score** and **post_score** is zero (before vs. after).",
+        "desc": "Test whether the mean difference between <b>pre_score</b> and <b>post_score</b> is zero (before vs. after).",
         "cols": ["subject_id", "pre_score", "post_score"],
         "note": "Two numeric columns required: select Variable 1 (pre) and Variable 2 (post)."
     },
@@ -156,7 +156,7 @@ SAMPLES = {
 14,Treatment,77
 15,Treatment,73
 16,Treatment,79""",
-        "desc": "Test whether **score** means differ between **Control** and **Treatment** groups.",
+        "desc": "Test whether <b>score</b> means differ between <b>Control</b> and <b>Treatment</b> groups.",
         "cols": ["subject_id", "group", "score"],
         "note": "One grouping column (categorical) and one numeric outcome column required."
     }
