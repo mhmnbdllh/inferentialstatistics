@@ -397,7 +397,7 @@ def run_independent(g1, g2, label1="Group 1", label2="Group 2", dep_var="Score",
     R["use_param"] = n1_res["pass"] and n2_res["pass"]
 
     # Levene's test
-    lev_f, lev_p = stats.levene(g1, g2)
+    lev_f, lev_p = stats.levene(g1, g2, center='mean')
     R["levene"] = {"F": float(lev_f), "df1": 1, "df2": n1+n2-2,
                    "Sig.": float(lev_p), "equal_var": float(lev_p) > alpha}
 
