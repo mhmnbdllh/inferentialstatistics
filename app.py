@@ -230,11 +230,11 @@ def test_normality(data, label=""):
 
     # Kolmogorov-Smirnov with Lilliefors correction (SPSS method)
     try:
-        ks_D, ks_p = lilliefors(data, dist='norm', pvalmethod='table')
+        ks_D, ks_p = lilliefors(data, dist='norm', pvalmethod='approx')
         # Lilliefors p is capped at 0.200 on the upper end (table limit)
         result["ks_D"] = float(ks_D)
         result["ks_p"] = float(ks_p)
-        result["ks_pass"] = float(ks_p) > 0.05
+        result["ks_pass"] = float(ks_p) >= 0.05
     except Exception:
         result["ks_D"] = np.nan
         result["ks_p"] = np.nan
@@ -275,7 +275,7 @@ def wilcoxon_spss(diff_arr):
     ties_corr = sum(t**3 - t for t in tie_grps.values()) / 48.0
     Var_W     = n*(n+1)*(2*n+1)/24 - ties_corr
     E_W       = n*(n+1)/4
-    Z = (W - E_W - 0.5 * np.sign(W - E_W)) / np.sqrt(Var_W) if Var_W > 0 else np.nan
+    Z  = (W - E_W) / np.sqrt(Var_W) if Var_W > 0 else np.nan
     p  = float(2 * stats.norm.sf(abs(Z))) if not np.isnan(Z) else np.nan
 
     return dict(W=W, Z=Z, p=p,
