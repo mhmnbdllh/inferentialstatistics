@@ -272,10 +272,12 @@ def wilcoxon_spss(diff_arr):
 
     # Ties-corrected variance (SPSS formula)
     tie_grps  = Counter(abs_d)
-    ties_corr = sum(t**3 - t for t in tie_grps.values()) / 48.0
+    tie_sum = sum(t**3 - t for t in tie_grps.values())
+    ties_corr = tie_sum / 48.0
     Var_W     = n*(n+1)*(2*n+1)/24 - ties_corr
     E_W       = n*(n+1)/4
-    Z  = (W - E_W) / np.sqrt(Var_W) if Var_W > 0 else np.nan
+    correction = 0.5 * np.sign(W - E_W)
+    Z = (W - E_W - correction) / np.sqrt(Var_W) if Var_W > 0 else np.nan
     p  = float(2 * stats.norm.sf(abs(Z))) if not np.isnan(Z) else np.nan
 
     return dict(W=W, Z=Z, p=p,
