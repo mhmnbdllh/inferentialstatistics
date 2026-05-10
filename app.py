@@ -1034,11 +1034,17 @@ def build_pdf(test_type, R, meta, interps, fig_bytes_list):
 # ══════════════════════════════════════════════════════════════════════════════
 def main():
     st.markdown("""
-    <div class="main-hdr">
-      <h1>📐 Inferential Statistics Suite
-        <span class="badge">SPSS-Equivalent</span></h1>
-      <p>Parametric & Non-Parametric · Shapiro-Wilk + Kolmogorov-Smirnov ·
-         Auto-selection · One-Sample · Paired · Independent</p>
+    <div class="main-hdr" style="display:flex; justify-content:space-between; align-items:center;">
+      <div>
+        <h1>📐 Inferential Statistics Suite
+          <span class="badge">SPSS-Equivalent</span></h1>
+        <p>Parametric & Non-Parametric · Shapiro-Wilk + Kolmogorov-Smirnov ·
+           Auto-selection · One-Sample · Paired · Independent</p>
+      </div>
+      <div style="text-align:center;">
+        <img src="https://muhaiminabdullah.com/media/thumbnails/QRIS-muhaiminabdullahdotcom-340x480.jpeg" width="110" style="border-radius:10px; border:2px solid #e94560;" />
+        <p style="color:#94a3b8; font-size:0.72rem; margin-top:0.4rem;">☕ Dukung Saya</p>
+      </div>
     </div>""", unsafe_allow_html=True)
 
     # ── Sidebar ────────────────────────────────────────────────────────────────
