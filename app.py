@@ -1042,7 +1042,7 @@ def main():
            Auto-selection · One-Sample · Paired · Independent</p>
       </div>
       <div style="text-align:center;">
-        <img src="https://muhaiminabdullah.com/media/thumbnails/QRIS-muhaiminabdullahdotcom-340x480.jpeg" width="110" style="border-radius:10px; border:2px solid #e94560;" />
+        <img src="https://muhaiminabdullah.com/media/thumbnails/QRIS-muhaiminabdullahdotcom-340x480.jpeg" width="240" style="border-radius:10px; border:2px solid #e94560;" />
         <p style="color:#94a3b8; font-size:0.72rem; margin-top:0.4rem;">☕ Dukung Saya</p>
       </div>
     </div>""", unsafe_allow_html=True)
