@@ -200,7 +200,7 @@ st.markdown("""
         <button class="donate-close" onclick="document.getElementById('donateOverlay').classList.remove('active')">✕</button>
         <h3>☕ Traktir Saya Kopi!</h3>
         <p>Jika app ini membantumu, dukung pengembangan lebih lanjut dengan donasi kecil via QRIS.</p>
-        <img src="LINK_QR_CODE_ANDA" alt="QR Code QRIS" />
+        <img src="https://muhaiminabdullah.com/media/thumbnails/QRIS-muhaiminabdullahdotcom-340x480.jpeg" alt="QR Code QRIS" />
         <p class="donate-note">Scan menggunakan e-wallet atau mobile banking apapun.</p>
         <p class="donate-note">Terima kasih banyak! 🙏</p>
     </div>
