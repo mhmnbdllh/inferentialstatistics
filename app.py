@@ -1043,7 +1043,7 @@ def main():
 
     st.markdown("""
     <div style="margin-bottom:1rem;">
-      <p style="color:#64748b; font-size:0.85rem; margin-bottom:0.4rem;">☕ Dukung pengembangan app ini — scan QRIS:</p>
+      <p style="color:#64748b; font-size:1.25rem; margin-top:1.25rem; margin-bottom:0.4rem;">☕ Support my Work — scan QRIS:</p>
       <img src="https://muhaiminabdullah.com/media/thumbnails/QRIS-muhaiminabdullahdotcom-340x480.jpeg" style="width:250px; min-width:250px; border-radius:10px; border:2px solid #e94560; display:block;" />
     </div>
     """, unsafe_allow_html=True)
