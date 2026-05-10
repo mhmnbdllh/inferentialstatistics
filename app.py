@@ -99,22 +99,95 @@ html,body,[class*="css"]{font-family:'DM Sans',sans-serif;}
   border:1px solid #fdba74;}
 </style>
 """, unsafe_allow_html=True)
-components.html("""
+
+st.markdown("""
 <style>
-.donate-btn{position:fixed;bottom:2rem;right:2rem;z-index:9999;background:#e94560;color:#fff;border:none;border-radius:50px;padding:0.7rem 1.3rem;font-family:'DM Sans',sans-serif;font-size:0.9rem;font-weight:600;cursor:pointer;box-shadow:0 4px 15px rgba(233,69,96,0.35);transition:all 0.3s ease;}
-.donate-btn:hover{background:#c73652;transform:translateY(-2px);}
-.donate-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:10000;justify-content:center;align-items:center;}
-.donate-overlay.active{display:flex;}
-.donate-modal{background:#f8fafc;border-radius:16px;padding:2rem;max-width:340px;width:90%;text-align:center;position:relative;box-shadow:0 20px 60px rgba(0,0,0,0.3);}
-.donate-modal h3{font-size:1.2rem;color:#1a1a2e;margin-bottom:0.4rem;font-weight:700;}
-.donate-modal p{color:#64748b;font-size:0.85rem;line-height:1.6;margin-bottom:1rem;}
-.donate-modal img{width:200px;height:200px;object-fit:contain;border-radius:12px;border:2px solid #e2e8f0;margin-bottom:1rem;}
-.donate-close{position:absolute;top:1rem;right:1rem;background:none;border:none;font-size:1.2rem;cursor:pointer;color:#94a3b8;}
-.donate-close:hover{color:#1a1a2e;}
-.donate-note{font-size:0.75rem;color:#94a3b8;margin-top:0.3rem;}
+.floating-donate {
+    position: fixed;
+    bottom: 2rem;
+    right: 2rem;
+    z-index: 99999;
+}
+.floating-donate button {
+    background: #e94560;
+    color: #fff;
+    border: none;
+    border-radius: 50px;
+    padding: 0.7rem 1.3rem;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    box-shadow: 0 4px 15px rgba(233,69,96,0.4);
+    transition: all 0.3s ease;
+}
+.floating-donate button:hover {
+    background: #c73652;
+    transform: translateY(-2px);
+}
+.donate-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.55);
+    z-index: 99999;
+    justify-content: center;
+    align-items: center;
+}
+.donate-overlay.active { display: flex; }
+.donate-modal {
+    background: #f8fafc;
+    border-radius: 16px;
+    padding: 2rem;
+    max-width: 340px;
+    width: 90%;
+    text-align: center;
+    position: relative;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+}
+.donate-modal h3 {
+    font-size: 1.2rem !important;
+    color: #1a1a2e !important;
+    font-weight: 700 !important;
+    margin-bottom: 0.4rem;
+}
+.donate-modal p {
+    color: #64748b;
+    font-size: 0.85rem;
+    line-height: 1.6;
+    margin-bottom: 1rem;
+}
+.donate-modal img {
+    width: 200px;
+    height: 200px;
+    object-fit: contain;
+    border-radius: 12px;
+    border: 2px solid #e2e8f0;
+    margin-bottom: 1rem;
+}
+.donate-close {
+    position: absolute;
+    top: 1rem;
+    right: 1rem;
+    background: none;
+    border: none;
+    font-size: 1.2rem;
+    cursor: pointer;
+    color: #94a3b8;
+}
+.donate-close:hover { color: #1a1a2e; }
+.donate-note {
+    font-size: 0.75rem !important;
+    color: #94a3b8 !important;
+    margin-top: 0.3rem !important;
+}
 </style>
-<button class="donate-btn" onclick="document.getElementById('donateOverlay').classList.add('active')">☕ Dukung Saya</button>
-<div class="donate-overlay" id="donateOverlay" onclick="closeDonate(event)">
+
+<div class="floating-donate">
+    <button onclick="document.getElementById('donateOverlay').classList.add('active')">☕ Dukung Saya</button>
+</div>
+
+<div class="donate-overlay" id="donateOverlay" onclick="if(event.target===this)this.classList.remove('active')">
     <div class="donate-modal">
         <button class="donate-close" onclick="document.getElementById('donateOverlay').classList.remove('active')">✕</button>
         <h3>☕ Traktir Saya Kopi!</h3>
@@ -124,10 +197,7 @@ components.html("""
         <p class="donate-note">Terima kasih banyak! 🙏</p>
     </div>
 </div>
-<script>
-function closeDonate(e){if(e.target===document.getElementById('donateOverlay'))document.getElementById('donateOverlay').classList.remove('active');}
-</script>
-""", height=0)
+""", unsafe_allow_html=True)
 
 
 # ── Sample CSV templates ───────────────────────────────────────────────────────
