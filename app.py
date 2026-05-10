@@ -1034,18 +1034,19 @@ def build_pdf(test_type, R, meta, interps, fig_bytes_list):
 # ══════════════════════════════════════════════════════════════════════════════
 def main():
     st.markdown("""
-    <div class="main-hdr" style="display:flex; justify-content:space-between; align-items:center;">
-      <div>
-        <h1>📐 Inferential Statistics Suite
-          <span class="badge">SPSS-Equivalent</span></h1>
-        <p>Parametric & Non-Parametric · Shapiro-Wilk + Kolmogorov-Smirnov ·
-           Auto-selection · One-Sample · Paired · Independent</p>
-      </div>
-      <div style="text-align:center;">
-        <img src="https://muhaiminabdullah.com/media/thumbnails/QRIS-muhaiminabdullahdotcom-340x480.jpeg" width="240" style="border-radius:10px; border:2px solid #e94560;" />
-        <p style="color:#94a3b8; font-size:0.72rem; margin-top:0.4rem;">☕ Dukung Saya</p>
-      </div>
+    <div class="main-hdr">
+      <h1>📐 Inferential Statistics Suite
+        <span class="badge">SPSS-Equivalent</span></h1>
+      <p>Parametric & Non-Parametric · Shapiro-Wilk + Kolmogorov-Smirnov ·
+         Auto-selection · One-Sample · Paired · Independent</p>
     </div>""", unsafe_allow_html=True)
+
+    st.markdown("""
+    <div style="margin-bottom:1rem;">
+      <p style="color:#64748b; font-size:0.85rem; margin-bottom:0.4rem;">☕ Dukung pengembangan app ini — scan QRIS:</p>
+      <img src="https://muhaiminabdullah.com/media/thumbnails/QRIS-muhaiminabdullahdotcom-340x480.jpeg" style="width:250px; min-width:250px; border-radius:10px; border:2px solid #e94560; display:block;" />
+    </div>
+    """, unsafe_allow_html=True)
 
     # ── Sidebar ────────────────────────────────────────────────────────────────
     with st.sidebar:
