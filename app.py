@@ -970,7 +970,7 @@ def build_pdf(test_type, R, meta, interps, fig_bytes_list):
         story.append(Paragraph("Test Statistics", H2))
         story.append(mktbl([
             ["Statistic","Value"],
-            ["Mann-Whitney U",          _f(np_r["U"],0)],
+            ["Mann-Whitney U",          _f(np_r["U"],3)],
             ["Wilcoxon W",              _f(np_r["W_wilcoxon"],1)],
             ["Z",                       _f(np_r["Z"])],
             ["Asymp. Sig. (2-tailed)",  _p(np_r["p"])],
