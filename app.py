@@ -3,6 +3,8 @@ Inferential Statistics App — SPSS-Equivalent Output
 ====================================================
 Parametric & Non-parametric tests with automatic selection via normality testing.
 Normality: Shapiro-Wilk + Kolmogorov-Smirnov (Lilliefors correction) — identical to SPSS.
+  - n <= 50 : Shapiro-Wilk as PRIMARY decision
+  - n >  50 : Kolmogorov-Smirnov as PRIMARY decision
 Tests: One-Sample T, Paired-Sample T, Independent-Sample T
        + Wilcoxon Signed-Rank (Z with ties correction), Mann-Whitney U (SPSS-exact)
 
@@ -12,6 +14,7 @@ SPSS Formula Notes:
   3. Wilcoxon Z = (W − E[W]) / sqrt(Var[W] − ties_correction)
   4. Mann-Whitney: U=min(U1,U2), W=rank_sum(group1), Mean Rank, Sum of Ranks, Z
   5. Paired Samples Correlations shown on parametric tab and all downloads
+  6. Mann-Whitney U displayed with decimals when ties present (e.g. 6.500)
 """
 
 import streamlit as st
@@ -26,6 +29,7 @@ import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 from io import BytesIO
 import io
+import base64
 import warnings
 from datetime import datetime
 
@@ -34,8 +38,9 @@ from reportlab.lib import colors
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import cm
 from reportlab.platypus import (SimpleDocTemplate, Table, TableStyle,
-                                 Paragraph, Spacer, HRFlowable, Image, PageBreak)
-from reportlab.lib.enums import TA_CENTER
+                                 Paragraph, Spacer, HRFlowable, Image,
+                                 PageBreak, KeepTogether)
+from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 
 warnings.filterwarnings("ignore")
 
@@ -68,6 +73,7 @@ html,body,[class*="css"]{font-family:'DM Sans',sans-serif;}
   color:#1e293b;white-space:nowrap;background:#fff;}
 .spss-tbl tr:nth-child(even) td{background:#f8fafc;}
 .spss-tbl td.left{text-align:left;font-weight:500;background:#f1f5f9!important;}
+.spss-tbl td.primary{text-align:center;font-weight:700;color:#e94560;background:#fff5f5!important;}
 .interp-box{background:linear-gradient(135deg,#f8fafc,#f1f5f9);
   border-left:4px solid #0284c7;padding:1rem 1.2rem;border-radius:0 10px 10px 0;
   margin:.7rem 0;font-size:.87rem;line-height:1.8;color:#1e293b;}
@@ -85,6 +91,7 @@ html,body,[class*="css"]{font-family:'DM Sans',sans-serif;}
   text-transform:uppercase;letter-spacing:.6px;}
 .pass{color:#16a34a;font-weight:700;}
 .fail{color:#dc2626;font-weight:700;}
+.primary-badge{color:#e94560;font-weight:700;}
 .warn-box{background:#fffbeb;border-left:4px solid #f59e0b;padding:.7rem 1rem;
   border-radius:0 6px 6px 0;font-size:.82rem;color:#92400e;margin:.4rem 0;}
 .info-box{background:#eff6ff;border-left:4px solid #3b82f6;padding:.7rem 1rem;
@@ -175,6 +182,14 @@ def _p(v):
         return "."
     return ".000" if v < .001 else f"{v:.3f}"
 
+def format_u(v):
+    """Format Mann-Whitney U: show decimals if .5 present (ties), else integer."""
+    if v is None or (isinstance(v, float) and np.isnan(v)):
+        return "."
+    if v != int(v):
+        return f"{v:.3f}"
+    return f"{v:.0f}"
+
 def effect_label_d(d):
     a = abs(d)
     if a < .2:  return "negligible"
@@ -209,8 +224,10 @@ def cohens_d_ind(g1, g2):
 def test_normality(data, label=""):
     """
     Run both Shapiro-Wilk and Kolmogorov-Smirnov (Lilliefors correction).
-    Decision (use_param) based on BOTH tests: pass only if BOTH p > alpha.
-    KS with Lilliefors correction = SPSS 'Kolmogorov-Smirnov with Lilliefors correction'.
+    PRIMARY decision rule based on sample size (n):
+      - n <= 50 : Shapiro-Wilk is primary (more powerful for small samples)
+      - n >  50 : KS Lilliefors is primary (recommended for large samples)
+    Both tests are always shown in output.
     """
     data = np.array(data, dtype=float)
     n = len(data)
@@ -219,38 +236,41 @@ def test_normality(data, label=""):
     if n < 3:
         result.update({"sw_W": np.nan, "sw_p": np.nan, "sw_pass": False,
                        "ks_D": np.nan, "ks_p": np.nan, "ks_pass": False,
-                       "pass": False})
+                       "pass": False, "primary": "sw",
+                       "primary_label": "Shapiro-Wilk"})
         return result
 
     # Shapiro-Wilk
     sw_W, sw_p = stats.shapiro(data)
-    result["sw_W"] = float(sw_W)
-    result["sw_p"] = float(sw_p)
+    result["sw_W"]   = float(sw_W)
+    result["sw_p"]   = float(sw_p)
     result["sw_pass"] = float(sw_p) > 0.05
 
-    # Kolmogorov-Smirnov with Lilliefors correction (SPSS method)
+    # Kolmogorov-Smirnov with Lilliefors correction
     try:
         ks_D, ks_p = lilliefors(data, dist='norm', pvalmethod='approx')
-        # Lilliefors p is capped at 0.200 on the upper end (table limit)
-        result["ks_D"] = float(ks_D)
-        result["ks_p"] = float(ks_p)
+        result["ks_D"]   = float(ks_D)
+        result["ks_p"]   = float(ks_p)
         result["ks_pass"] = float(ks_p) >= 0.05
     except Exception:
-        result["ks_D"] = np.nan
-        result["ks_p"] = np.nan
-        result["ks_pass"] = True  # if KS can't run, don't penalize
+        result["ks_D"]   = np.nan
+        result["ks_p"]   = np.nan
+        result["ks_pass"] = True
 
-    # Overall: pass if BOTH tests pass (conservative, matches SPSS logic)
-    result["pass"] = result["sw_pass"] and result["ks_pass"]
+    # PRIMARY rule based on n
+    if n <= 50:
+        result["primary"]       = "sw"
+        result["primary_label"] = "Shapiro-Wilk"
+        result["pass"]          = result["sw_pass"]
+    else:
+        result["primary"]       = "ks"
+        result["primary_label"] = "Kolmogorov-Smirnov"
+        result["pass"]          = result["ks_pass"]
+
     return result
 
 # ── SPSS-exact Wilcoxon Z (with ties correction) ──────────────────────────────
 def wilcoxon_spss(diff_arr):
-    """
-    Wilcoxon signed-rank test exactly as SPSS.
-    W = min(positive rank sum, negative rank sum)
-    Z uses ties-corrected variance.
-    """
     diff_arr = np.array(diff_arr, dtype=float)
     diff_nz  = diff_arr[diff_arr != 0]
     n        = len(diff_nz)
@@ -270,7 +290,6 @@ def wilcoxon_spss(diff_arr):
     n_neg    = int(np.sum(diff_nz < 0))
     W        = min(pos_rs, neg_rs)
 
-    # Ties-corrected variance (SPSS formula)
     tie_grps  = Counter(abs_d)
     ties_corr = sum(t**3 - t for t in tie_grps.values()) / 48.0
     Var_W     = n*(n+1)*(2*n+1)/24 - ties_corr
@@ -285,12 +304,6 @@ def wilcoxon_spss(diff_arr):
 
 # ── SPSS-exact Mann-Whitney U ──────────────────────────────────────────────────
 def mannwhitney_spss(g1, g2, label1, label2):
-    """
-    Mann-Whitney U exactly as SPSS:
-      U  = min(U1, U2)
-      W  = rank sum of first group (Wilcoxon W in SPSS output)
-      Z  = normal approximation with ties correction
-    """
     g1, g2   = np.array(g1, dtype=float), np.array(g2, dtype=float)
     n1, n2   = len(g1), len(g2)
     N        = n1 + n2
@@ -302,9 +315,8 @@ def mannwhitney_spss(g1, g2, label1, label2):
     U1 = n1*n2 + n1*(n1+1)/2 - R1
     U2 = n1*n2 + n2*(n2+1)/2 - R2
     U  = min(U1, U2)
-    W_wilcoxon = R1          # SPSS Wilcoxon W = rank sum of group 1
+    W_wilcoxon = R1
 
-    # Ties-corrected Z
     tie_grps  = Counter(all_rnks)
     ties_corr = sum(t**3 - t for t in tie_grps.values()) / (N*(N-1)) if N > 1 else 0
     Var_U     = n1*n2/12 * (N + 1 - ties_corr)
@@ -342,7 +354,6 @@ def run_one_sample(data, mu0, alpha=0.05):
     R["normality"]  = [norm]
     R["use_param"]  = norm["pass"]
 
-    # Parametric
     t_stat, p_two = stats.ttest_1samp(data, mu0)
     df = n - 1; tc = stats.t.ppf(1 - alpha/2, df)
     diff_m = m - mu0
@@ -359,7 +370,6 @@ def run_one_sample(data, mu0, alpha=0.05):
         "cohens_d": d
     }
 
-    # Non-parametric (Wilcoxon, SPSS-exact Z)
     w_res = wilcoxon_spss(data - mu0)
     R["nonparametric"] = {**w_res,
                           "test": "Wilcoxon Signed-Rank Test",
@@ -391,7 +401,6 @@ def run_paired(data1, data2, label1="Var1", label2="Var2", alpha=0.05):
          f"{int((1-alpha)*100)}% CI Upper": ci2_u},
     ])
 
-    # Pearson correlation (SPSS Paired Samples Correlations table)
     r_corr, p_corr = stats.pearsonr(data1, data2)
     R["correlation"] = pd.DataFrame([{
         "Pair":  f"{label1} & {label2}",
@@ -400,12 +409,10 @@ def run_paired(data1, data2, label1="Var1", label2="Var2", alpha=0.05):
         "Sig. (2-tailed)":     float(p_corr)
     }])
 
-    # Normality on differences (both SW + KS)
     norm = test_normality(diff, f"{label1} − {label2}")
     R["normality"]  = [norm]
     R["use_param"]  = norm["pass"]
 
-    # Parametric
     t_stat, p_two = stats.ttest_rel(data1, data2)
     df = n - 1
     m_diff  = np.mean(diff); sd_diff = np.std(diff, ddof=1)
@@ -425,7 +432,6 @@ def run_paired(data1, data2, label1="Var1", label2="Var2", alpha=0.05):
         "cohens_d": d
     }
 
-    # Non-parametric: Wilcoxon SPSS-exact
     w_res = wilcoxon_spss(diff)
     R["nonparametric"] = {**w_res,
                           "test": "Wilcoxon Signed-Rank Test",
@@ -463,20 +469,17 @@ def run_independent(g1, g2, label1="Group 1", label2="Group 2",
          "Kurtosis": float(stats.kurtosis(g2))},
     ])
 
-    # Normality per group (SW + KS)
     n1_res = test_normality(g1, label1)
     n2_res = test_normality(g2, label2)
     R["normality"]  = [n1_res, n2_res]
     R["use_param"]  = n1_res["pass"] and n2_res["pass"]
 
-    # Levene center='mean' (SPSS default)
     lev_f, lev_p = stats.levene(g1, g2, center='mean')
     R["levene"] = {
         "F": float(lev_f), "df1": 1, "df2": n1+n2-2,
         "Sig.": float(lev_p), "equal_var": float(lev_p) > alpha
     }
 
-    # Parametric: equal-var + Welch
     t_eq,    p_eq    = stats.ttest_ind(g1, g2, equal_var=True)
     t_welch, p_welch = stats.ttest_ind(g1, g2, equal_var=False)
     df_eq    = n1 + n2 - 2
@@ -504,7 +507,6 @@ def run_independent(g1, g2, label1="Group 1", label2="Group 2",
         "cohens_d": d
     }
 
-    # Non-parametric: Mann-Whitney SPSS-exact
     mw = mannwhitney_spss(g1, g2, label1, label2)
     R["nonparametric"] = {**mw, "test": "Mann-Whitney U Test", "dep_var": dep_var}
     return R
@@ -516,12 +518,15 @@ def interpret_one_sample(R, var_name, alpha):
     lines = []
     norm = R["normality"][0]; pr = R["parametric"]
     sw_ok = norm["sw_pass"]; ks_ok = norm["ks_pass"]
+    primary = norm["primary_label"]
+    n = norm["n"]
     lines.append(
         f"<b>Normality:</b> Shapiro-Wilk W = {_f(norm['sw_W'])}, "
         f"p = {_p(norm['sw_p'])} ({'normal' if sw_ok else 'non-normal'}); "
         f"Kolmogorov-Smirnov D = {_f(norm['ks_D'])}, "
         f"p = {_p(norm['ks_p'])} ({'normal' if ks_ok else 'non-normal'}). "
-        f"{'Both tests indicate normality → parametric test applied.' if R['use_param'] else 'Normality violated → non-parametric test applied.'}"
+        f"Primary test: <b>{primary}</b> (n {'≤' if n <= 50 else '>'} 50). "
+        f"{'Parametric test applied.' if R['use_param'] else 'Non-parametric test applied.'}"
     )
     if R["use_param"]:
         sig = pr["p_two"] < alpha
@@ -551,12 +556,15 @@ def interpret_paired(R, alpha):
     r_v  = float(corr["Pearson Correlation"].iloc[0])
     p_v  = float(corr["Sig. (2-tailed)"].iloc[0])
     sw_ok = norm["sw_pass"]; ks_ok = norm["ks_pass"]
+    primary = norm["primary_label"]
+    n = norm["n"]
     lines.append(
         f"<b>Normality of Differences:</b> "
         f"Shapiro-Wilk W = {_f(norm['sw_W'])}, p = {_p(norm['sw_p'])} "
         f"({'normal' if sw_ok else 'non-normal'}); "
         f"Kolmogorov-Smirnov D = {_f(norm['ks_D'])}, p = {_p(norm['ks_p'])} "
         f"({'normal' if ks_ok else 'non-normal'}). "
+        f"Primary test: <b>{primary}</b> (n {'≤' if n <= 50 else '>'} 50). "
         f"{'Parametric analysis applied.' if R['use_param'] else 'Non-parametric analysis applied.'}"
     )
     lines.append(
@@ -588,23 +596,26 @@ def interpret_paired(R, alpha):
 def interpret_independent(R, dep_var, alpha):
     lines = []
     norms = R["normality"]; lev = R["levene"]; pr = R["parametric"]
-    for n in norms:
-        sw_ok = n["sw_pass"]; ks_ok = n["ks_pass"]
+    for n_item in norms:
+        sw_ok = n_item["sw_pass"]; ks_ok = n_item["ks_pass"]
+        primary = n_item["primary_label"]
+        n = n_item["n"]
         lines.append(
-            f"<b>Normality — {n['label']}:</b> "
-            f"Shapiro-Wilk W = {_f(n['sw_W'])}, p = {_p(n['sw_p'])} "
+            f"<b>Normality — {n_item['label']}:</b> "
+            f"Shapiro-Wilk W = {_f(n_item['sw_W'])}, p = {_p(n_item['sw_p'])} "
             f"({'normal' if sw_ok else 'non-normal'}); "
-            f"KS D = {_f(n['ks_D'])}, p = {_p(n['ks_p'])} "
-            f"({'normal' if ks_ok else 'non-normal'})."
+            f"KS D = {_f(n_item['ks_D'])}, p = {_p(n_item['ks_p'])} "
+            f"({'normal' if ks_ok else 'non-normal'}). "
+            f"Primary: <b>{primary}</b> (n {'≤' if n <= 50 else '>'} 50)."
         )
     lines.append(
         f"<b>Overall:</b> "
-        f"{'Both groups are normally distributed → parametric test applied.' if R['use_param'] else 'Non-normality detected → non-parametric test applied.'}"
+        f"{'Both groups meet normality assumption → parametric test applied.' if R['use_param'] else 'Normality assumption violated → non-parametric test applied.'}"
     )
     lines.append(
         f"<b>Levene's Test:</b> F({lev['df1']}, {lev['df2']}) = {_f(lev['F'])}, "
         f"p = {_p(lev['Sig.'])}. "
-        f"{'Equal variances assumed.' if lev['equal_var'] else 'Equal variances NOT assumed → Welch correction.'}"
+        f"{'Equal variances assumed.' if lev['equal_var'] else 'Equal variances NOT assumed → Welch correction applied.'}"
     )
     if R["use_param"]:
         use_eq = lev["equal_var"]
@@ -626,8 +637,8 @@ def interpret_independent(R, dep_var, alpha):
         np_r = R["nonparametric"]
         sig  = np_r["p"] < alpha if not np.isnan(np_r["p"]) else False
         lines.append(
-            f"<b>Mann-Whitney U:</b> U = {_f(np_r['U'],0)}, "
-            f"W = {_f(np_r['W_wilcoxon'],1)}, Z = {_f(np_r['Z'])}, "
+            f"<b>Mann-Whitney U:</b> U = {format_u(np_r['U'])}, "
+            f"W = {_f(np_r['W_wilcoxon'],3)}, Z = {_f(np_r['Z'])}, "
             f"p = {_p(np_r['p'])} (2-tailed). "
             f"{'Significant difference.' if sig else 'No significant difference.'}"
         )
@@ -643,6 +654,12 @@ def fig_to_bytes(fig):
     fig.savefig(buf, format="png", dpi=150, bbox_inches="tight")
     buf.seek(0)
     return buf.read()
+
+def fig_to_base64(fig):
+    buf = BytesIO()
+    fig.savefig(buf, format="png", dpi=120, bbox_inches="tight")
+    buf.seek(0)
+    return base64.b64encode(buf.read()).decode("utf-8")
 
 def plot_one_sample(data, mu0, var_name):
     data = np.array(data, dtype=float)
@@ -758,9 +775,11 @@ def plot_independent(g1, g2, label1, label2, dep_var):
 # ══════════════════════════════════════════════════════════════════════════════
 # HTML TABLE HELPER
 # ══════════════════════════════════════════════════════════════════════════════
-def html_tbl(rows, left_cols=None):
+def html_tbl(rows, left_cols=None, primary_cols=None):
     if left_cols is None:
         left_cols = {0}
+    if primary_cols is None:
+        primary_cols = set()
     html = '<div class="spss-wrap"><table class="spss-tbl"><thead><tr>'
     for h in rows[0]:
         html += f"<th>{h}</th>"
@@ -768,7 +787,12 @@ def html_tbl(rows, left_cols=None):
     for row in rows[1:]:
         html += "<tr>"
         for i, v in enumerate(row):
-            cls = ' class="left"' if i in left_cols else ""
+            if i in primary_cols:
+                cls = ' class="primary"'
+            elif i in left_cols:
+                cls = ' class="left"'
+            else:
+                cls = ""
             html += f"<td{cls}>{v}</td>"
         html += "</tr>"
     html += "</tbody></table></div>"
@@ -781,154 +805,88 @@ def df_to_rows(df):
     return rows
 
 # ══════════════════════════════════════════════════════════════════════════════
-# PDF GENERATOR
+# HTML OFFLINE REPORT GENERATOR
 # ══════════════════════════════════════════════════════════════════════════════
-def build_pdf(test_type, R, meta, interps, fig_bytes_list):
-    buf = io.BytesIO()
-    doc = SimpleDocTemplate(buf, pagesize=A4,
-                             rightMargin=1.8*cm, leftMargin=1.8*cm,
-                             topMargin=2*cm, bottomMargin=2*cm)
+def build_html_report(test_type, R, meta, interps, fig_bytes_list):
+    """Generate a standalone offline HTML report with embedded plots."""
 
-    H1  = ParagraphStyle("H1", fontSize=12, fontName="Helvetica-Bold",
-                          textColor=colors.white,
-                          backColor=colors.HexColor("#1a1a2e"),
-                          spaceAfter=5, spaceBefore=12,
-                          borderPadding=(5,8,5,8))
-    H2  = ParagraphStyle("H2", fontSize=10, fontName="Helvetica-Bold",
-                          textColor=colors.HexColor("#1a1a2e"),
-                          spaceAfter=3, spaceBefore=8)
-    IT  = ParagraphStyle("IT", fontSize=8.5, fontName="Helvetica", leading=13,
-                          backColor=colors.HexColor("#eff6ff"),
-                          borderPadding=(5,8,5,8), spaceAfter=5)
-    NT  = ParagraphStyle("NT", fontSize=7.5, fontName="Helvetica-Oblique",
-                          textColor=colors.HexColor("#64748b"), spaceAfter=4)
-    TIT = ParagraphStyle("TIT", fontSize=17, fontName="Helvetica-Bold",
-                          textColor=colors.HexColor("#1a1a2e"), alignment=TA_CENTER)
-    SUB = ParagraphStyle("SUB", fontSize=10, fontName="Helvetica",
-                          textColor=colors.HexColor("#64748b"),
-                          alignment=TA_CENTER, spaceAfter=16)
-    BD  = ParagraphStyle("BD", fontSize=8.5, fontName="Helvetica",
-                          leading=13, spaceAfter=4)
+    def tbl_html(rows, left_cols=None):
+        if left_cols is None:
+            left_cols = {0}
+        h = '<table class="rtbl"><thead><tr>'
+        for cell in rows[0]:
+            h += f"<th>{cell}</th>"
+        h += "</tr></thead><tbody>"
+        for i, row in enumerate(rows[1:]):
+            h += f'<tr class="{"even" if i%2==0 else "odd"}">'
+            for j, cell in enumerate(row):
+                cls = ' class="left"' if j in left_cols else ""
+                h += f"<td{cls}>{cell}</td>"
+            h += "</tr>"
+        h += "</tbody></table>"
+        return h
 
-    TS = TableStyle([
-        ("BACKGROUND",(0,0),(-1,0), colors.HexColor("#1a1a2e")),
-        ("TEXTCOLOR",(0,0),(-1,0),  colors.white),
-        ("FONTNAME",(0,0),(-1,0),   "Helvetica-Bold"),
-        ("FONTNAME",(0,1),(-1,-1),  "Helvetica"),
-        ("FONTSIZE",(0,0),(-1,-1),  7.5),
-        ("ROWBACKGROUNDS",(0,1),(-1,-1),[colors.white,colors.HexColor("#f8fafc")]),
-        ("GRID",(0,0),(-1,-1), .5, colors.HexColor("#e2e8f0")),
-        ("ALIGN",(1,0),(-1,-1),    "CENTER"),
-        ("ALIGN",(0,0),(0,-1),     "LEFT"),
-        ("VALIGN",(0,0),(-1,-1),   "MIDDLE"),
-        ("TOPPADDING",(0,0),(-1,-1),    4),
-        ("BOTTOMPADDING",(0,0),(-1,-1), 4),
-        ("LEFTPADDING",(0,0),(-1,-1),   6),
-        ("RIGHTPADDING",(0,0),(-1,-1),  6),
-    ])
+    def sec(title):
+        return f'<div class="sec-hdr">{title}</div>'
 
-    def mktbl(rows_data):
-        t = Table(rows_data, repeatRows=1)
-        t.setStyle(TS)
-        return t
+    def subsec(title):
+        return f'<div class="subsec-hdr">{title}</div>'
 
-    story = []
-    story.append(Spacer(1, .4*cm))
-    story.append(Paragraph("INFERENTIAL STATISTICS REPORT", TIT))
-    story.append(Paragraph(
-        "SPSS-Equivalent · Shapiro-Wilk + Kolmogorov-Smirnov · "
-        "Parametric & Non-Parametric", SUB))
-    story.append(HRFlowable(width="100%", thickness=2,
-                             color=colors.HexColor("#e94560")))
-    story.append(Spacer(1, 6))
+    pr   = R["parametric"]
+    np_r = R["nonparametric"]
+    alpha = meta.get("α", 0.05)
 
-    mt = Table([[k, str(v)] for k,v in meta.items()],
-               colWidths=[5*cm, 11*cm])
-    mt.setStyle(TableStyle([
-        ("FONTNAME",(0,0),(0,-1),"Helvetica-Bold"),
-        ("FONTNAME",(1,0),(1,-1),"Helvetica"),
-        ("FONTSIZE",(0,0),(-1,-1),8.5),
-        ("TEXTCOLOR",(0,0),(0,-1),colors.HexColor("#1a1a2e")),
-        ("TOPPADDING",(0,0),(-1,-1),3),
-        ("BOTTOMPADDING",(0,0),(-1,-1),3)]))
-    story.append(mt)
-    story.append(Spacer(1,6))
-    story.append(HRFlowable(width="100%",thickness=.5,
-                             color=colors.HexColor("#e2e8f0")))
+    # ── Normality tables
+    norm_sw_rows = [["Variable","N","Statistic (W)","Sig.","Result","Role"]]
+    norm_ks_rows = [["Variable","N","Statistic (D)","Sig.ᵃ","Result","Role"]]
+    for n_item in R["normality"]:
+        is_primary_sw = n_item["primary"] == "sw"
+        is_primary_ks = n_item["primary"] == "ks"
+        sw_res = "✓ Normal" if n_item["sw_pass"] else "✗ Non-Normal"
+        ks_res = "✓ Normal" if n_item["ks_pass"] else "✗ Non-Normal"
+        sw_role = "★ Patokan" if is_primary_sw else "Pendukung"
+        ks_role = "★ Patokan" if is_primary_ks else "Pendukung"
+        norm_sw_rows.append([n_item["label"], str(n_item["n"]),
+                             _f(n_item["sw_W"]), _p(n_item["sw_p"]),
+                             sw_res, sw_role])
+        norm_ks_rows.append([n_item["label"], str(n_item["n"]),
+                             _f(n_item["ks_D"]), _p(n_item["ks_p"]),
+                             ks_res, ks_role])
 
-    sec = 1
+    # ── Descriptive table
+    dd = R["desc"].copy()
+    for c in dd.select_dtypes(include=float).columns:
+        dd[c] = dd[c].apply(_f)
+    desc_rows = df_to_rows(dd)
 
-    # 1. Normality (both SW + KS)
-    story.append(Paragraph(f"  {sec}. TESTS OF NORMALITY", H1)); sec += 1
-    story.append(Paragraph(
-        "a) Shapiro-Wilk Test", H2))
-    sw_rows = [["Variable","N","Statistic (W)","Sig.","Result"]]
-    for n in R["normality"]:
-        sw_rows.append([n["label"], str(n["n"]), _f(n["sw_W"]), _p(n["sw_p"]),
-                        "Normal" if n["sw_pass"] else "Non-Normal"])
-    story.append(mktbl(sw_rows))
+    # ── Figures as base64
+    figs_html = ""
+    for i, fb in enumerate(fig_bytes_list, 1):
+        b64 = base64.b64encode(fb).decode("utf-8")
+        figs_html += f"""
+        <div class="fig-wrap">
+          <img src="data:image/png;base64,{b64}" style="width:100%;max-width:900px;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.10);" />
+          <p class="fig-cap">Figure {i}. Diagnostic plots for {test_type}.</p>
+        </div>"""
 
-    story.append(Paragraph(
-        "b) Kolmogorov-Smirnov Test (Lilliefors Significance Correction)", H2))
-    ks_rows = [["Variable","N","Statistic (D)","Sig.ᵃ","Result"]]
-    for n in R["normality"]:
-        ks_rows.append([n["label"], str(n["n"]), _f(n["ks_D"]), _p(n["ks_p"]),
-                        "Normal" if n["ks_pass"] else "Non-Normal"])
-    story.append(mktbl(ks_rows))
-    story.append(Paragraph(
-        "ᵃ Lilliefors Significance Correction applied. "
-        f"{'Parametric' if R['use_param'] else 'Non-parametric'} analysis selected "
-        "(pass = BOTH tests p > .05).", NT))
-
-    # 2. Descriptives
-    story.append(Paragraph(f"  {sec}. DESCRIPTIVE STATISTICS", H1)); sec += 1
-    desc = R["desc"].copy()
-    for c in desc.select_dtypes(include=float).columns:
-        desc[c] = desc[c].apply(_f)
-    story.append(mktbl(df_to_rows(desc)))
-
-    # 3. Paired correlation (paired only)
-    if "correlation" in R:
-        story.append(Paragraph(f"  {sec}. PAIRED SAMPLES CORRELATIONS", H1)); sec += 1
-        corr = R["correlation"].copy()
-        corr["Pearson Correlation"] = corr["Pearson Correlation"].apply(_f)
-        corr["Sig. (2-tailed)"]     = corr["Sig. (2-tailed)"].apply(_p)
-        story.append(mktbl(df_to_rows(corr)))
-
-    # 4. Levene (independent only)
-    if "levene" in R:
-        story.append(Paragraph(
-            f"  {sec}. LEVENE'S TEST FOR EQUALITY OF VARIANCES", H1)); sec += 1
-        lev = R["levene"]
-        story.append(mktbl([
-            ["F","df1","df2","Sig.","Result"],
-            [_f(lev["F"]), str(lev["df1"]), str(lev["df2"]), _p(lev["Sig."]),
-             "Equal var. assumed" if lev["equal_var"] else "Equal var. NOT assumed"]
-        ]))
-        story.append(Paragraph("Note. Based on mean (SPSS default).", NT))
-
-    # 5. Parametric results
-    story.append(Paragraph(f"  {sec}. PARAMETRIC TEST RESULTS", H1)); sec += 1
-    pr = R["parametric"]
+    # ── Parametric result table
+    param_html = ""
     if test_type == "One-Sample T-Test":
-        story.append(mktbl([
+        param_html = tbl_html([
             ["","t","df","Sig.(2-tail)","Sig.(1-tail L)","Sig.(1-tail U)",
-             "Mean Diff","95% CI Lower","95% CI Upper","Cohen's d"],
+             "Mean Diff","95% CI Lower","95% CI Upper","Cohen's d","Effect Size"],
             [f"Test value = {pr['mu0']}",
              _f(pr["t"]), str(pr["df"]), _p(pr["p_two"]),
              _p(pr["p_one_lower"]), _p(pr["p_one_upper"]),
              _f(pr["mean_diff"]), _f(pr["ci_lower"]), _f(pr["ci_upper"]),
-             _f(pr["cohens_d"])]
-        ]))
+             _f(pr["cohens_d"]), effect_label_d(pr["cohens_d"])]
+        ])
     elif test_type == "Paired-Sample T-Test":
-        # correlation sub-table repeated for context
-        story.append(Paragraph("Paired Samples Correlations", H2))
         corr2 = R["correlation"].copy()
         corr2["Pearson Correlation"] = corr2["Pearson Correlation"].apply(_f)
         corr2["Sig. (2-tailed)"]     = corr2["Sig. (2-tailed)"].apply(_p)
-        story.append(mktbl(df_to_rows(corr2)))
-        story.append(Paragraph("Paired Samples Test", H2))
-        story.append(mktbl([
+        param_html = subsec("Paired Samples Correlations") + tbl_html(df_to_rows(corr2))
+        param_html += subsec("Paired Samples Test") + tbl_html([
             ["Pair","Mean Diff","SD","SE","95% CI L","95% CI U",
              "t","df","Sig.(2-tail)","Sig.(1-tail L)","Sig.(1-tail U)","Cohen's d"],
             [f"{pr['label1']} – {pr['label2']}",
@@ -937,44 +895,46 @@ def build_pdf(test_type, R, meta, interps, fig_bytes_list):
              _f(pr["t"]), str(pr["df"]),
              _p(pr["p_two"]), _p(pr["p_one_lower"]), _p(pr["p_one_upper"]),
              _f(pr["cohens_d"])]
-        ]))
+        ])
     else:
         lev = R["levene"]
-        story.append(mktbl([
+        param_html = tbl_html([
             ["","F(Levene)","Sig.","t","df","Sig.(2-tail)",
+             "Sig.(1-tail L)","Sig.(1-tail U)",
              "Mean Diff","SE Diff","95% CI L","95% CI U","Cohen's d"],
             ["Equal var. assumed",
              _f(lev["F"]), _p(lev["Sig."]),
              _f(pr["t_eq"]), str(pr["df_eq"]), _p(pr["p_eq"]),
+             _p(stats.t.cdf(pr["t_eq"], pr["df_eq"])),
+             _p(1-stats.t.cdf(pr["t_eq"], pr["df_eq"])),
              _f(pr["mean_diff"]), _f(pr["se_eq"]),
              _f(pr["ci_eq_l"]), _f(pr["ci_eq_u"]), _f(pr["cohens_d"])],
             ["Equal var. NOT assumed","","",
              _f(pr["t_welch"]), _f(pr["df_welch"],2), _p(pr["p_welch"]),
+             _p(stats.t.cdf(pr["t_welch"], pr["df_welch"])),
+             _p(1-stats.t.cdf(pr["t_welch"], pr["df_welch"])),
              _f(pr["mean_diff"]), _f(pr["se_welch"]),
              _f(pr["ci_welch_l"]), _f(pr["ci_welch_u"]), "—"]
-        ]))
+        ])
 
-    # 6. Non-parametric results
-    story.append(Paragraph(f"  {sec}. NON-PARAMETRIC TEST RESULTS", H1)); sec += 1
-    np_r = R["nonparametric"]
+    # ── Non-parametric result table
+    nonparam_html = ""
     if test_type == "Independent-Sample T-Test":
-        story.append(Paragraph("Ranks", H2))
-        story.append(mktbl([
+        nonparam_html = subsec("Ranks") + tbl_html([
             ["Group","N","Mean Rank","Sum of Ranks"],
             [np_r["label1"], str(np_r["n1"]),
-             _f(np_r["mean_rank1"]), _f(np_r["R1"],1)],
+             _f(np_r["mean_rank1"]), _f(np_r["R1"],3)],
             [np_r["label2"], str(np_r["n2"]),
-             _f(np_r["mean_rank2"]), _f(np_r["R2"],1)],
+             _f(np_r["mean_rank2"]), _f(np_r["R2"],3)],
             ["Total", str(np_r["n1"]+np_r["n2"]), "", ""]
-        ]))
-        story.append(Paragraph("Test Statistics", H2))
-        story.append(mktbl([
+        ])
+        nonparam_html += subsec("Test Statistics") + tbl_html([
             ["Statistic","Value"],
-            ["Mann-Whitney U",          _f(np_r["U"],3)],
-            ["Wilcoxon W",              _f(np_r["W_wilcoxon"],1)],
+            ["Mann-Whitney U",          format_u(np_r["U"])],
+            ["Wilcoxon W",              _f(np_r["W_wilcoxon"],3)],
             ["Z",                       _f(np_r["Z"])],
             ["Asymp. Sig. (2-tailed)",  _p(np_r["p"])],
-        ]))
+        ])
     else:
         n_neg  = np_r.get("n_neg",0)
         n_pos  = np_r.get("n_pos",0)
@@ -984,46 +944,642 @@ def build_pdf(test_type, R, meta, interps, fig_bytes_list):
         pos_rs = np_r.get("pos_rank_sum", np.nan)
         neg_mr = neg_rs/n_neg if n_neg > 0 else np.nan
         pos_mr = pos_rs/n_pos if n_pos > 0 else np.nan
-        story.append(Paragraph("Ranks", H2))
-        story.append(mktbl([
+        pair_lbl = (f"{pr['label1']} − {pr['label2']}"
+                    if test_type == "Paired-Sample T-Test" else "Variable − μ₀")
+        nonparam_html = subsec("Ranks") + tbl_html([
             ["","N","Mean Rank","Sum of Ranks"],
-            ["Negative Ranks", str(n_neg), _f(neg_mr), _f(neg_rs,1)],
-            ["Positive Ranks", str(n_pos), _f(pos_mr), _f(pos_rs,1)],
+            ["Negative Ranks", str(n_neg), _f(neg_mr), _f(neg_rs,3)],
+            ["Positive Ranks", str(n_pos), _f(pos_mr), _f(pos_rs,3)],
             ["Ties",           str(n_ties),"",""],
             ["Total",          str(n_tot), "",""]
-        ]))
-        pair_lbl = (f"{pr['label1']} − {pr['label2']}"
-                    if test_type == "Paired-Sample T-Test"
-                    else "Variable − μ₀")
-        story.append(Paragraph("Test Statistics", H2))
-        story.append(mktbl([
+        ])
+        nonparam_html += subsec("Test Statistics") + tbl_html([
             ["Statistic", pair_lbl],
             ["Test Statistic (W)", _f(np_r["W"],0)],
             ["Z",                  _f(np_r["Z"])],
             ["Asymp. Sig. (2-tailed)", _p(np_r["p"])],
-        ]))
+        ])
 
-    # 7. Interpretation
-    story.append(Paragraph(f"  {sec}. INTERPRETATION", H1)); sec += 1
+    # ── Interpretation
+    interp_html = ""
+    for line in interps:
+        lw = line.lower()
+        if "significant difference" in lw and "no statistically" not in lw and "not significant" not in lw:
+            cls = "sig"
+        elif "no significant" in lw or "not significant" in lw or "does not significantly" in lw:
+            cls = "nonsig"
+        else:
+            cls = "neutral"
+        interp_html += f'<div class="interp {cls}">{line}</div>'
+
+    # ── Meta table
+    meta_html = "<table class='meta-tbl'>"
+    for k, v in meta.items():
+        meta_html += f"<tr><td class='mk'>{k}</td><td class='mv'>{v}</td></tr>"
+    meta_html += "</table>"
+
+    # ── Normality note
+    primary_n = R["normality"][0]["n"]
+    primary_label = R["normality"][0]["primary_label"]
+    norm_note = (f"★ Patokan = {primary_label} karena n {'≤' if primary_n <= 50 else '>'} 50. "
+                 f"Kedua uji tetap ditampilkan sebagai informasi lengkap.")
+
+    # ── Levene section (independent only)
+    levene_html = ""
+    if "levene" in R:
+        lev = R["levene"]
+        res = "✓ Equal variances assumed" if lev["equal_var"] else "✗ Equal variances NOT assumed (Welch)"
+        levene_html = sec("4. LEVENE'S TEST FOR EQUALITY OF VARIANCES") + tbl_html([
+            ["F","df1","df2","Sig.","Result"],
+            [_f(lev["F"]), str(lev["df1"]), str(lev["df2"]), _p(lev["Sig."]), res]
+        ]) + '<p class="note">Note. Based on mean (SPSS default). p > .05 → equal variances assumed.</p>'
+
+    # ── Corr section (paired only)
+    corr_html = ""
+    if "correlation" in R:
+        corr3 = R["correlation"].copy()
+        corr3["Pearson Correlation"] = corr3["Pearson Correlation"].apply(_f)
+        corr3["Sig. (2-tailed)"]     = corr3["Sig. (2-tailed)"].apply(_p)
+        corr_html = sec("3. PAIRED SAMPLES CORRELATIONS") + tbl_html(df_to_rows(corr3))
+
+    sec_param_n = "4" if "correlation" not in R else "5"
+    if "levene" in R:
+        sec_param_n = "5"
+    sec_nonparam_n = str(int(sec_param_n) + 1)
+    sec_interp_n   = str(int(sec_nonparam_n) + 1)
+    sec_fig_n      = str(int(sec_interp_n) + 1)
+
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Inferential Statistics Report — {test_type}</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@300;400;600;700&display=swap');
+*{{box-sizing:border-box;margin:0;padding:0;}}
+body{{font-family:'DM Sans',sans-serif;background:#f0f4f8;color:#1e293b;font-size:14px;}}
+.page{{max-width:1100px;margin:0 auto;padding:32px 24px 60px;}}
+.cover{{background:linear-gradient(135deg,#0a0a0a 0%,#1a1a2e 50%,#16213e 100%);
+  border-radius:16px;padding:40px 48px;margin-bottom:32px;
+  border-left:6px solid #e94560;box-shadow:0 12px 48px rgba(233,69,96,.18);}}
+.cover h1{{color:#fff;font-size:1.8rem;font-weight:700;margin-bottom:6px;}}
+.cover .sub{{color:#94a3b8;font-size:.9rem;margin-bottom:24px;}}
+.cover .badge{{display:inline-block;background:#e94560;color:#fff;
+  font-size:.68rem;padding:3px 10px;border-radius:20px;
+  font-weight:600;margin-right:6px;}}
+.meta-tbl{{width:100%;border-collapse:collapse;margin-top:20px;}}
+.meta-tbl td{{padding:5px 10px;font-size:.83rem;}}
+.meta-tbl td.mk{{color:#94a3b8;font-weight:600;width:200px;font-family:'DM Mono',monospace;}}
+.meta-tbl td.mv{{color:#e2e8f0;}}
+.section{{background:#fff;border-radius:12px;padding:24px 28px;
+  margin-bottom:24px;box-shadow:0 2px 12px rgba(0,0,0,.06);}}
+.sec-hdr{{background:linear-gradient(90deg,#1a1a2e,#16213e);color:#e2e8f0;
+  padding:10px 18px;border-radius:8px 8px 0 0;font-weight:700;font-size:.82rem;
+  letter-spacing:.7px;margin:-24px -28px 20px;font-family:'DM Mono',monospace;
+  border-bottom:3px solid #e94560;}}
+.subsec-hdr{{background:#f1f5f9;color:#1a1a2e;padding:7px 12px;
+  border-radius:6px;font-weight:600;font-size:.8rem;margin:16px 0 8px;
+  border-left:3px solid #e94560;}}
+.rtbl{{width:100%;border-collapse:collapse;font-family:'DM Mono',monospace;
+  font-size:.73rem;margin-bottom:8px;}}
+.rtbl th{{background:#1a1a2e;color:#e2e8f0;padding:8px 12px;text-align:center;
+  font-weight:600;border:1px solid #334155;white-space:nowrap;font-size:.71rem;}}
+.rtbl td{{padding:6px 12px;border:1px solid #e2e8f0;text-align:right;
+  white-space:nowrap;}}
+.rtbl tr.even td{{background:#fff;}}
+.rtbl tr.odd td{{background:#f8fafc;}}
+.rtbl td.left{{text-align:left;font-weight:500;background:#f1f5f9!important;}}
+.note{{font-size:.72rem;color:#64748b;font-style:italic;margin-top:8px;}}
+.interp{{padding:12px 16px;border-radius:0 10px 10px 0;margin:8px 0;
+  font-size:.85rem;line-height:1.8;border-left:4px solid #0284c7;
+  background:linear-gradient(135deg,#f8fafc,#f1f5f9);}}
+.interp b{{color:#0284c7;}}
+.interp.sig{{border-left-color:#16a34a;background:linear-gradient(135deg,#f0fdf4,#dcfce7);}}
+.interp.sig b{{color:#16a34a;}}
+.interp.nonsig{{border-left-color:#dc2626;background:linear-gradient(135deg,#fef2f2,#fee2e2);}}
+.interp.nonsig b{{color:#dc2626;}}
+.fig-wrap{{text-align:center;margin:16px 0;}}
+.fig-cap{{font-size:.75rem;color:#64748b;font-style:italic;margin-top:8px;}}
+.footer{{text-align:center;color:#94a3b8;font-size:.72rem;margin-top:40px;
+  padding-top:16px;border-top:1px solid #e2e8f0;}}
+.decision-box{{padding:12px 18px;border-radius:10px;margin:16px 0;
+  font-size:.88rem;font-weight:600;}}
+.use-param{{background:#dcfce7;color:#14532d;border:1px solid #86efac;}}
+.use-nonparam{{background:#ffedd5;color:#7c2d12;border:1px solid #fdba74;}}
+.primary-star{{color:#e94560;font-weight:700;}}
+@media print{{body{{background:#fff;}} .page{{padding:0;}} .cover{{border-radius:0;}}}}
+</style>
+</head>
+<body>
+<div class="page">
+
+<!-- COVER -->
+<div class="cover">
+  <h1>📐 Inferential Statistics Report</h1>
+  <div class="sub">
+    <span class="badge">SPSS-Equivalent</span>
+    <span class="badge">Shapiro-Wilk + KS Lilliefors</span>
+    <span class="badge">Parametric &amp; Non-Parametric</span>
+  </div>
+  {meta_html}
+</div>
+
+<!-- DECISION -->
+<div class="section">
+  <div class="sec-hdr">ANALYSIS DECISION</div>
+  <div class="decision-box {'use-param' if R['use_param'] else 'use-nonparam'}">
+    {'✅' if R['use_param'] else '⚠️'} Primary normality test (n {'≤' if R['normality'][0]['n'] <= 50 else '>'} 50): 
+    <b>{primary_label}</b> p {'>' if R['use_param'] else '≤'} .05 → 
+    <b>{'Parametric' if R['use_param'] else 'Non-Parametric'} analysis applied</b>
+  </div>
+</div>
+
+<!-- NORMALITY -->
+<div class="section">
+  <div class="sec-hdr">1. TESTS OF NORMALITY</div>
+  <div class="subsec-hdr">a) Shapiro-Wilk Test</div>
+  {tbl_html(norm_sw_rows, left_cols={{0,4,5}})}
+  <div class="subsec-hdr">b) Kolmogorov-Smirnov Test (Lilliefors Significance Correction)</div>
+  {tbl_html(norm_ks_rows, left_cols={{0,4,5}})}
+  <p class="note">ᵃ Lilliefors Significance Correction applied. {norm_note}</p>
+</div>
+
+<!-- DESCRIPTIVES -->
+<div class="section">
+  <div class="sec-hdr">2. DESCRIPTIVE STATISTICS</div>
+  {tbl_html(desc_rows)}
+</div>
+
+{f'<!-- CORRELATION --><div class="section">{corr_html}</div>' if corr_html else ''}
+
+{f'<!-- LEVENE --><div class="section">{levene_html}</div>' if levene_html else ''}
+
+<!-- PARAMETRIC -->
+<div class="section">
+  <div class="sec-hdr">{sec_param_n}. PARAMETRIC TEST RESULTS</div>
+  {param_html}
+</div>
+
+<!-- NON-PARAMETRIC -->
+<div class="section">
+  <div class="sec-hdr">{sec_nonparam_n}. NON-PARAMETRIC TEST RESULTS</div>
+  {nonparam_html}
+</div>
+
+<!-- INTERPRETATION -->
+<div class="section">
+  <div class="sec-hdr">{sec_interp_n}. INTERPRETATION</div>
+  {interp_html}
+</div>
+
+<!-- FIGURES -->
+<div class="section">
+  <div class="sec-hdr">{sec_fig_n}. FIGURES &amp; DIAGNOSTIC PLOTS</div>
+  {figs_html}
+</div>
+
+<div class="footer">
+  Generated by Inferential Statistics App · SPSS-equivalent · 
+  KS with Lilliefors correction · Levene center=mean · 
+  Wilcoxon Z ties-corrected · Mann-Whitney SPSS exact ·
+  Generated: {datetime.now().strftime("%B %d, %Y %H:%M")}
+</div>
+
+</div>
+</body>
+</html>"""
+    return html.encode("utf-8")
+
+# ══════════════════════════════════════════════════════════════════════════════
+# PDF GENERATOR — FIXED LAYOUT
+# ══════════════════════════════════════════════════════════════════════════════
+def build_pdf(test_type, R, meta, interps, fig_bytes_list):
+    buf = io.BytesIO()
+
+    doc = SimpleDocTemplate(
+        buf, pagesize=A4,
+        rightMargin=1.8*cm, leftMargin=1.8*cm,
+        topMargin=2.2*cm, bottomMargin=2.2*cm
+    )
+
+    PAGE_W = A4[0] - 3.6*cm  # usable width
+
+    # ── Styles ────────────────────────────────────────────────────────────────
+    DARK    = colors.HexColor("#1a1a2e")
+    RED     = colors.HexColor("#e94560")
+    SLATE   = colors.HexColor("#334155")
+    LIGHT   = colors.HexColor("#f8fafc")
+    LIGHTER = colors.HexColor("#f1f5f9")
+    BLUE    = colors.HexColor("#0284c7")
+    GREEN   = colors.HexColor("#16a34a")
+    AMBER   = colors.HexColor("#f59e0b")
+
+    sTitle = ParagraphStyle("sTitle", fontSize=20, fontName="Helvetica-Bold",
+                             textColor=DARK, alignment=TA_CENTER, spaceAfter=4)
+    sSub   = ParagraphStyle("sSub", fontSize=9, fontName="Helvetica",
+                             textColor=colors.HexColor("#64748b"),
+                             alignment=TA_CENTER, spaceAfter=14)
+    sSecH  = ParagraphStyle("sSecH", fontSize=9, fontName="Helvetica-Bold",
+                             textColor=colors.white,
+                             backColor=DARK, spaceBefore=14, spaceAfter=6,
+                             borderPadding=(5, 10, 5, 10), leading=14)
+    sSubH  = ParagraphStyle("sSubH", fontSize=8.5, fontName="Helvetica-Bold",
+                             textColor=DARK, spaceBefore=8, spaceAfter=4)
+    sBody  = ParagraphStyle("sBody", fontSize=8, fontName="Helvetica",
+                             leading=12, spaceAfter=4)
+    sNote  = ParagraphStyle("sNote", fontSize=7, fontName="Helvetica-Oblique",
+                             textColor=colors.HexColor("#64748b"), spaceAfter=4)
+    sInterp = ParagraphStyle("sInterp", fontSize=8, fontName="Helvetica",
+                              leading=13, spaceAfter=5,
+                              backColor=colors.HexColor("#eff6ff"),
+                              borderPadding=(6, 10, 6, 10))
+    sFig   = ParagraphStyle("sFig", fontSize=7.5, fontName="Helvetica-Oblique",
+                             textColor=colors.HexColor("#64748b"),
+                             alignment=TA_CENTER, spaceAfter=8)
+    sFooter = ParagraphStyle("sFooter", fontSize=6.5, fontName="Helvetica-Oblique",
+                              textColor=colors.HexColor("#94a3b8"),
+                              alignment=TA_CENTER)
+
+    # ── Table style factory ───────────────────────────────────────────────────
+    def make_ts(col_widths=None, small=False):
+        fs = 6.5 if small else 7.5
+        return TableStyle([
+            ("BACKGROUND", (0,0), (-1,0), DARK),
+            ("TEXTCOLOR",  (0,0), (-1,0), colors.white),
+            ("FONTNAME",   (0,0), (-1,0), "Helvetica-Bold"),
+            ("FONTNAME",   (0,1), (-1,-1), "Helvetica"),
+            ("FONTSIZE",   (0,0), (-1,-1), fs),
+            ("ROWBACKGROUNDS", (0,1), (-1,-1), [colors.white, LIGHT]),
+            ("GRID",       (0,0), (-1,-1), 0.4, colors.HexColor("#e2e8f0")),
+            ("ALIGN",      (0,0), (-1,-1), "CENTER"),
+            ("ALIGN",      (0,1), (0,-1),  "LEFT"),
+            ("VALIGN",     (0,0), (-1,-1), "MIDDLE"),
+            ("TOPPADDING",    (0,0), (-1,-1), 4),
+            ("BOTTOMPADDING", (0,0), (-1,-1), 4),
+            ("LEFTPADDING",   (0,0), (-1,-1), 6),
+            ("RIGHTPADDING",  (0,0), (-1,-1), 6),
+        ])
+
+    def mktbl(rows_data, col_widths=None, small=False):
+        t = Table(rows_data, colWidths=col_widths, repeatRows=1)
+        t.setStyle(make_ts(small=small))
+        return t
+
+    # ── Helper: auto-fit col widths ────────────────────────────────────────────
+    def auto_cw(n_cols, first_wide=True):
+        if first_wide:
+            first = PAGE_W * 0.28
+            rest  = (PAGE_W - first) / max(n_cols - 1, 1)
+            return [first] + [rest]*(n_cols-1)
+        else:
+            w = PAGE_W / n_cols
+            return [w]*n_cols
+
+    story = []
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # COVER PAGE
+    # ══════════════════════════════════════════════════════════════════════════
+    story.append(Spacer(1, 1*cm))
+    story.append(Paragraph("INFERENTIAL STATISTICS REPORT", sTitle))
+    story.append(Paragraph(
+        "SPSS-Equivalent  ·  Shapiro-Wilk + Kolmogorov-Smirnov  ·  "
+        "Parametric &amp; Non-Parametric", sSub))
+    story.append(HRFlowable(width=PAGE_W, thickness=2.5, color=RED, spaceAfter=14))
+
+    # Meta table
+    meta_data = [[str(k), str(v)] for k, v in meta.items()]
+    mt = Table(meta_data, colWidths=[4*cm, PAGE_W - 4*cm])
+    mt.setStyle(TableStyle([
+        ("FONTNAME",   (0,0), (0,-1), "Helvetica-Bold"),
+        ("FONTNAME",   (1,0), (1,-1), "Helvetica"),
+        ("FONTSIZE",   (0,0), (-1,-1), 8.5),
+        ("TEXTCOLOR",  (0,0), (0,-1), DARK),
+        ("TEXTCOLOR",  (1,0), (1,-1), SLATE),
+        ("TOPPADDING",    (0,0), (-1,-1), 4),
+        ("BOTTOMPADDING", (0,0), (-1,-1), 4),
+        ("LINEBELOW",  (0,-1), (-1,-1), 0.3, colors.HexColor("#e2e8f0")),
+    ]))
+    story.append(mt)
+    story.append(Spacer(1, 10))
+    story.append(HRFlowable(width=PAGE_W, thickness=0.5,
+                             color=colors.HexColor("#e2e8f0"), spaceAfter=6))
+
+    # Decision banner
+    use_p    = R["use_param"]
+    prim_n   = R["normality"][0]["n"]
+    prim_lbl = R["normality"][0]["primary_label"]
+    banner_txt = (
+        f"{'✓' if use_p else '!'} Primary test: {prim_lbl} "
+        f"(n {'≤' if prim_n <= 50 else '>'} 50)  →  "
+        f"{'PARAMETRIC' if use_p else 'NON-PARAMETRIC'} analysis applied"
+    )
+    banner_tbl = Table([[banner_txt]], colWidths=[PAGE_W])
+    banner_tbl.setStyle(TableStyle([
+        ("BACKGROUND", (0,0), (-1,-1),
+         colors.HexColor("#dcfce7") if use_p else colors.HexColor("#ffedd5")),
+        ("TEXTCOLOR",  (0,0), (-1,-1),
+         colors.HexColor("#14532d") if use_p else colors.HexColor("#7c2d12")),
+        ("FONTNAME",   (0,0), (-1,-1), "Helvetica-Bold"),
+        ("FONTSIZE",   (0,0), (-1,-1), 8.5),
+        ("ALIGN",      (0,0), (-1,-1), "CENTER"),
+        ("TOPPADDING",    (0,0), (-1,-1), 8),
+        ("BOTTOMPADDING", (0,0), (-1,-1), 8),
+        ("ROUNDEDCORNERS", [6]),
+    ]))
+    story.append(Spacer(1, 6))
+    story.append(banner_tbl)
+    story.append(Spacer(1, 12))
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # 1. NORMALITY
+    # ══════════════════════════════════════════════════════════════════════════
+    story.append(KeepTogether([
+        Paragraph("  1.  TESTS OF NORMALITY", sSecH),
+        Spacer(1, 4),
+        Paragraph("a)  Shapiro-Wilk Test", sSubH),
+    ]))
+
+    sw_rows = [["Variable", "N", "Statistic (W)", "Sig.", "Result", "Role"]]
+    for n_item in R["normality"]:
+        role = "★ Patokan" if n_item["primary"] == "sw" else "Pendukung"
+        res  = "Normal" if n_item["sw_pass"] else "Non-Normal"
+        sw_rows.append([n_item["label"], str(n_item["n"]),
+                        _f(n_item["sw_W"]), _p(n_item["sw_p"]), res, role])
+    sw_tbl = mktbl(sw_rows, col_widths=auto_cw(6))
+    # Highlight patokan role column
+    for i, row in enumerate(sw_rows[1:], 1):
+        if row[5] == "★ Patokan":
+            sw_tbl.setStyle(TableStyle([
+                ("TEXTCOLOR", (5,i),(5,i), RED),
+                ("FONTNAME",  (5,i),(5,i), "Helvetica-Bold"),
+            ]))
+    story.append(sw_tbl)
+    story.append(Spacer(1, 8))
+
+    story.append(Paragraph(
+        "b)  Kolmogorov-Smirnov Test (Lilliefors Significance Correction)", sSubH))
+    ks_rows = [["Variable", "N", "Statistic (D)", "Sig.ᵃ", "Result", "Role"]]
+    for n_item in R["normality"]:
+        role = "★ Patokan" if n_item["primary"] == "ks" else "Pendukung"
+        res  = "Normal" if n_item["ks_pass"] else "Non-Normal"
+        ks_rows.append([n_item["label"], str(n_item["n"]),
+                        _f(n_item["ks_D"]), _p(n_item["ks_p"]), res, role])
+    ks_tbl = mktbl(ks_rows, col_widths=auto_cw(6))
+    for i, row in enumerate(ks_rows[1:], 1):
+        if row[5] == "★ Patokan":
+            ks_tbl.setStyle(TableStyle([
+                ("TEXTCOLOR", (5,i),(5,i), RED),
+                ("FONTNAME",  (5,i),(5,i), "Helvetica-Bold"),
+            ]))
+    story.append(ks_tbl)
+    story.append(Paragraph(
+        f"ᵃ Lilliefors Significance Correction applied. "
+        f"★ Patokan = {prim_lbl} (n {'≤' if prim_n <= 50 else '>'} 50). "
+        f"{'Parametric' if use_p else 'Non-parametric'} analysis selected.",
+        sNote))
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # 2. DESCRIPTIVES
+    # ══════════════════════════════════════════════════════════════════════════
+    story.append(Spacer(1, 6))
+    story.append(Paragraph("  2.  DESCRIPTIVE STATISTICS", sSecH))
+    story.append(Spacer(1, 4))
+    dd = R["desc"].copy()
+    for c in dd.select_dtypes(include=float).columns:
+        dd[c] = dd[c].apply(_f)
+    desc_rows_data = df_to_rows(dd)
+    n_dc = len(desc_rows_data[0])
+    story.append(mktbl(desc_rows_data, col_widths=auto_cw(n_dc), small=True))
+
+    sec_num = 3
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # 3. PAIRED CORRELATION (optional)
+    # ══════════════════════════════════════════════════════════════════════════
+    if "correlation" in R:
+        story.append(Spacer(1, 6))
+        story.append(Paragraph(f"  {sec_num}.  PAIRED SAMPLES CORRELATIONS", sSecH))
+        story.append(Spacer(1, 4))
+        corr = R["correlation"].copy()
+        corr["Pearson Correlation"] = corr["Pearson Correlation"].apply(_f)
+        corr["Sig. (2-tailed)"]     = corr["Sig. (2-tailed)"].apply(_p)
+        corr_rows = df_to_rows(corr)
+        story.append(mktbl(corr_rows, col_widths=auto_cw(len(corr_rows[0]))))
+        sec_num += 1
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # LEVENE (optional)
+    # ══════════════════════════════════════════════════════════════════════════
+    if "levene" in R:
+        story.append(Spacer(1, 6))
+        story.append(Paragraph(
+            f"  {sec_num}.  LEVENE'S TEST FOR EQUALITY OF VARIANCES", sSecH))
+        story.append(Spacer(1, 4))
+        lev = R["levene"]
+        lev_rows = [
+            ["F", "df1", "df2", "Sig.", "Result"],
+            [_f(lev["F"]), str(lev["df1"]), str(lev["df2"]),
+             _p(lev["Sig."]),
+             "Equal var. assumed" if lev["equal_var"] else "Equal var. NOT assumed (Welch)"]
+        ]
+        story.append(mktbl(lev_rows, col_widths=auto_cw(5)))
+        story.append(Paragraph("Note. Based on mean (SPSS default).", sNote))
+        sec_num += 1
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # PARAMETRIC RESULTS
+    # ══════════════════════════════════════════════════════════════════════════
+    story.append(Spacer(1, 6))
+    story.append(Paragraph(f"  {sec_num}.  PARAMETRIC TEST RESULTS", sSecH))
+    story.append(Spacer(1, 4))
+
+    if test_type == "One-Sample T-Test":
+        p_rows = [
+            ["", "t", "df", "Sig.\n(2-tail)", "Sig.\n(1-tail L)",
+             "Sig.\n(1-tail U)", "Mean\nDiff", "95% CI\nLower",
+             "95% CI\nUpper", "Cohen's d", "Effect"],
+            [f"Test val={pr['mu0']}",
+             _f(pr["t"]), str(pr["df"]), _p(pr["p_two"]),
+             _p(pr["p_one_lower"]), _p(pr["p_one_upper"]),
+             _f(pr["mean_diff"]), _f(pr["ci_lower"]), _f(pr["ci_upper"]),
+             _f(pr["cohens_d"]), effect_label_d(pr["cohens_d"])]
+        ]
+        story.append(mktbl(p_rows, col_widths=auto_cw(11, first_wide=True), small=True))
+
+    elif test_type == "Paired-Sample T-Test":
+        story.append(Paragraph("Paired Samples Correlations", sSubH))
+        corr2 = R["correlation"].copy()
+        corr2["Pearson Correlation"] = corr2["Pearson Correlation"].apply(_f)
+        corr2["Sig. (2-tailed)"]     = corr2["Sig. (2-tailed)"].apply(_p)
+        story.append(mktbl(df_to_rows(corr2),
+                           col_widths=auto_cw(len(df_to_rows(corr2)[0]))))
+        story.append(Spacer(1, 6))
+        story.append(Paragraph("Paired Samples Test", sSubH))
+        p_rows = [
+            ["Pair", "Mean\nDiff", "SD", "SE", "95% CI\nLower",
+             "95% CI\nUpper", "t", "df", "Sig.\n(2-tail)",
+             "Sig.\n(1-tail L)", "Sig.\n(1-tail U)", "Cohen's d"],
+            [f"{pr['label1']} – {pr['label2']}",
+             _f(pr["mean_diff"]), _f(pr["sd_diff"]), _f(pr["se_diff"]),
+             _f(pr["ci_lower"]), _f(pr["ci_upper"]),
+             _f(pr["t"]), str(pr["df"]),
+             _p(pr["p_two"]), _p(pr["p_one_lower"]), _p(pr["p_one_upper"]),
+             _f(pr["cohens_d"])]
+        ]
+        story.append(mktbl(p_rows, col_widths=auto_cw(12, first_wide=True), small=True))
+
+    else:
+        lev = R["levene"]
+        # Split into 2 sub-tables for readability
+        story.append(Paragraph("a) Test Results", sSubH))
+        p_rows_a = [
+            ["", "F\n(Levene)", "Sig.\n(Levene)", "t", "df",
+             "Sig.\n(2-tail)", "Sig.\n(1-tail L)", "Sig.\n(1-tail U)"],
+            ["Equal var. assumed",
+             _f(lev["F"]), _p(lev["Sig."]),
+             _f(pr["t_eq"]), str(pr["df_eq"]), _p(pr["p_eq"]),
+             _p(stats.t.cdf(pr["t_eq"], pr["df_eq"])),
+             _p(1-stats.t.cdf(pr["t_eq"], pr["df_eq"]))],
+            ["Equal var. NOT assumed", "", "",
+             _f(pr["t_welch"]), _f(pr["df_welch"],2), _p(pr["p_welch"]),
+             _p(stats.t.cdf(pr["t_welch"], pr["df_welch"])),
+             _p(1-stats.t.cdf(pr["t_welch"], pr["df_welch"]))]
+        ]
+        story.append(mktbl(p_rows_a, col_widths=auto_cw(8, first_wide=True), small=True))
+        story.append(Spacer(1, 6))
+        story.append(Paragraph("b) Confidence Interval &amp; Effect Size", sSubH))
+        p_rows_b = [
+            ["", "Mean Diff", "SE Diff", "95% CI Lower",
+             "95% CI Upper", "Cohen's d"],
+            ["Equal var. assumed",
+             _f(pr["mean_diff"]), _f(pr["se_eq"]),
+             _f(pr["ci_eq_l"]), _f(pr["ci_eq_u"]), _f(pr["cohens_d"])],
+            ["Equal var. NOT assumed",
+             _f(pr["mean_diff"]), _f(pr["se_welch"]),
+             _f(pr["ci_welch_l"]), _f(pr["ci_welch_u"]), "—"]
+        ]
+        story.append(mktbl(p_rows_b, col_widths=auto_cw(6, first_wide=True), small=True))
+
+    sec_num += 1
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # NON-PARAMETRIC RESULTS
+    # ══════════════════════════════════════════════════════════════════════════
+    story.append(Spacer(1, 6))
+    story.append(Paragraph(f"  {sec_num}.  NON-PARAMETRIC TEST RESULTS", sSecH))
+    story.append(Spacer(1, 4))
+
+    if test_type == "Independent-Sample T-Test":
+        story.append(Paragraph("Ranks", sSubH))
+        rank_rows = [
+            ["Group", "N", "Mean Rank", "Sum of Ranks"],
+            [np_r["label1"], str(np_r["n1"]),
+             _f(np_r["mean_rank1"]), _f(np_r["R1"],3)],
+            [np_r["label2"], str(np_r["n2"]),
+             _f(np_r["mean_rank2"]), _f(np_r["R2"],3)],
+            ["Total", str(np_r["n1"]+np_r["n2"]), "", ""]
+        ]
+        story.append(mktbl(rank_rows, col_widths=auto_cw(4)))
+        story.append(Spacer(1, 6))
+        story.append(Paragraph("Test Statistics", sSubH))
+        stat_rows = [
+            ["Statistic", "Value"],
+            ["Mann-Whitney U",         format_u(np_r["U"])],
+            ["Wilcoxon W",             _f(np_r["W_wilcoxon"],3)],
+            ["Z",                      _f(np_r["Z"])],
+            ["Asymp. Sig. (2-tailed)", _p(np_r["p"])],
+        ]
+        story.append(mktbl(stat_rows, col_widths=[PAGE_W*0.65, PAGE_W*0.35]))
+    else:
+        n_neg  = np_r.get("n_neg", 0)
+        n_pos  = np_r.get("n_pos", 0)
+        n_ties = np_r.get("n_ties", 0)
+        n_tot  = np_r.get("n_total", n_neg+n_pos+n_ties)
+        neg_rs = np_r.get("neg_rank_sum", np.nan)
+        pos_rs = np_r.get("pos_rank_sum", np.nan)
+        neg_mr = neg_rs/n_neg if n_neg > 0 else np.nan
+        pos_mr = pos_rs/n_pos if n_pos > 0 else np.nan
+        pair_lbl = (f"{pr['label1']} − {pr['label2']}"
+                    if test_type == "Paired-Sample T-Test" else "Variable − μ₀")
+
+        footnotes_exist = (test_type == "Paired-Sample T-Test")
+        story.append(Paragraph("Ranks", sSubH))
+        r_rows = [
+            ["", "N", "Mean Rank", "Sum of Ranks"],
+            [("Negative Ranks ᵃ" if footnotes_exist else "Negative Ranks"),
+             str(n_neg), _f(neg_mr), _f(neg_rs,3)],
+            [("Positive Ranks ᵇ" if footnotes_exist else "Positive Ranks"),
+             str(n_pos), _f(pos_mr), _f(pos_rs,3)],
+            [("Ties ᶜ" if footnotes_exist else "Ties"), str(n_ties), "", ""],
+            ["Total", str(n_tot), "", ""]
+        ]
+        story.append(mktbl(r_rows, col_widths=auto_cw(4)))
+        if footnotes_exist:
+            story.append(Paragraph(
+                f"ᵃ {pr['label2']} &lt; {pr['label1']}  "
+                f"ᵇ {pr['label2']} &gt; {pr['label1']}  "
+                f"ᶜ {pr['label2']} = {pr['label1']}", sNote))
+        story.append(Spacer(1, 6))
+        story.append(Paragraph("Test Statistics", sSubH))
+        stat_rows = [
+            ["Statistic", pair_lbl],
+            ["Test Statistic (W)", _f(np_r["W"],0)],
+            ["Z",                  _f(np_r["Z"])],
+            ["Asymp. Sig. (2-tailed)", _p(np_r["p"])],
+        ]
+        story.append(mktbl(stat_rows, col_widths=[PAGE_W*0.55, PAGE_W*0.45]))
+        story.append(Paragraph(
+            f"Based on {'negative' if n_neg < n_pos else 'positive'} ranks. "
+            "Z uses ties-corrected variance (SPSS method).", sNote))
+
+    sec_num += 1
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # INTERPRETATION
+    # ══════════════════════════════════════════════════════════════════════════
+    story.append(PageBreak())
+    story.append(Paragraph(f"  {sec_num}.  INTERPRETATION", sSecH))
+    story.append(Spacer(1, 6))
     for line in interps:
         clean = (line.replace("<b>","").replace("</b>","")
                      .replace("<i>","").replace("</i>",""))
-        story.append(Paragraph(clean, IT))
+        story.append(Paragraph(clean, sInterp))
+        story.append(Spacer(1, 3))
 
-    # 8. Figures
-    story.append(PageBreak())
-    story.append(Paragraph(f"  {sec}. FIGURES", H1))
+    sec_num += 1
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # FIGURES
+    # ══════════════════════════════════════════════════════════════════════════
+    story.append(Spacer(1, 12))
+    story.append(Paragraph(f"  {sec_num}.  FIGURES &amp; DIAGNOSTIC PLOTS", sSecH))
+    story.append(Spacer(1, 10))
+
     for i, fb in enumerate(fig_bytes_list, 1):
-        story.append(Image(io.BytesIO(fb), width=17*cm, height=5*cm))
-        story.append(Paragraph(f"Figure {i}. Diagnostic plots.", NT))
-        story.append(Spacer(1, 8))
+        img_obj = Image(io.BytesIO(fb), width=PAGE_W, height=PAGE_W*0.38)
+        img_obj.hAlign = "CENTER"
+        story.append(KeepTogether([
+            img_obj,
+            Spacer(1, 4),
+            Paragraph(
+                f"Figure {i}. Diagnostic plots — {test_type}. "
+                "Left: distribution; Centre: group comparison; Right: Q-Q plot.",
+                sFig),
+            Spacer(1, 10),
+        ]))
 
-    story.append(HRFlowable(width="100%", thickness=.5,
-                             color=colors.HexColor("#e2e8f0")))
+    # Footer
+    story.append(Spacer(1, 16))
+    story.append(HRFlowable(width=PAGE_W, thickness=0.5,
+                             color=colors.HexColor("#e2e8f0"), spaceAfter=6))
     story.append(Paragraph(
-        "Generated by Inferential Statistics App · SPSS-equivalent · "
-        "KS with Lilliefors correction · Levene center=mean · "
-        "Wilcoxon Z ties-corrected · Mann-Whitney SPSS exact", NT))
+        "Generated by Inferential Statistics App  ·  SPSS-equivalent  ·  "
+        "KS Lilliefors correction  ·  Levene center=mean  ·  "
+        "Wilcoxon Z ties-corrected  ·  Mann-Whitney SPSS exact  ·  "
+        f"n≤50 → SW primary, n&gt;50 → KS primary",
+        sFooter))
 
     doc.build(story)
     buf.seek(0)
@@ -1213,21 +1769,24 @@ def main():
     st.success("✅ Analysis complete!")
 
     # Decision banner
-    use_p = R["use_param"]
+    use_p    = R["use_param"]
+    prim_n   = R["normality"][0]["n"]
+    prim_lbl = R["normality"][0]["primary_label"]
     test_name_used = (
-        {"One-Sample T-Test":       "One-Sample T-Test",
-         "Paired-Sample T-Test":    "Paired T-Test",
+        {"One-Sample T-Test":        "One-Sample T-Test",
+         "Paired-Sample T-Test":     "Paired T-Test",
          "Independent-Sample T-Test":"Independent T-Test"}[test_type]
         if use_p else
-        {"One-Sample T-Test":       "Wilcoxon Signed-Rank",
-         "Paired-Sample T-Test":    "Wilcoxon Signed-Rank",
+        {"One-Sample T-Test":        "Wilcoxon Signed-Rank",
+         "Paired-Sample T-Test":     "Wilcoxon Signed-Rank",
          "Independent-Sample T-Test":"Mann-Whitney U"}[test_type]
     )
     cls = "use-param" if use_p else "use-nonparam"
     st.markdown(
         f'<div class="decision-banner {cls}">'
         f'{"✅" if use_p else "⚠️"} '
-        f'SW & KS: both p {">" if use_p else "≤"} .05 → '
+        f'Primary test: <b>{prim_lbl}</b> (n {"≤" if prim_n <= 50 else ">"} 50) '
+        f'→ p {">" if use_p else "≤"} .05 → '
         f'<b>{test_name_used}</b> selected automatically'
         f'</div>', unsafe_allow_html=True)
 
@@ -1255,8 +1814,8 @@ def main():
                        (_f(pr["cohens_d"]),"Cohen's d")]
     else:
         if test_type == "Independent-Sample T-Test":
-            metrics = [(_f(np_r["U"],0),"Mann-Whitney U"),
-                       (_f(np_r["W_wilcoxon"],1),"Wilcoxon W"),
+            metrics = [(format_u(np_r["U"]),"Mann-Whitney U"),
+                       (_f(np_r["W_wilcoxon"],3),"Wilcoxon W"),
                        (_f(np_r["Z"]),"Z"),
                        (_p(np_r["p"]),"Sig. (2-tailed)"),
                        (str(np_r["n1"]+np_r["n2"]),"Total N")]
@@ -1285,50 +1844,53 @@ def main():
     tabs = st.tabs(tab_labels)
     ti   = 0
 
-    # ── Tab: Normality (SW + KS) ──────────────────────────────────────────────
+    # ── Tab: Normality ────────────────────────────────────────────────────────
     _t0 = ti; ti += 1
     with tabs[_t0]:
-        # Shapiro-Wilk
         st.markdown(
             '<div class="sec-title">Shapiro-Wilk Test</div>',
             unsafe_allow_html=True)
-        sw_rows = [["Variable","N","Statistic (W)","Sig.","Result"]]
-        for n in R["normality"]:
-            res = ('<span class="pass">✓ Normal</span>'
-                   if n["sw_pass"] else '<span class="fail">✗ Non-Normal</span>')
-            sw_rows.append([n["label"], str(n["n"]),
-                            _f(n["sw_W"]), _p(n["sw_p"]), res])
-        st.markdown(html_tbl(sw_rows, left_cols={0,4}), unsafe_allow_html=True)
+        sw_rows = [["Variable","N","Statistic (W)","Sig.","Result","Role"]]
+        for n_item in R["normality"]:
+            is_primary = n_item["primary"] == "sw"
+            res  = ('<span class="pass">✓ Normal</span>'
+                    if n_item["sw_pass"] else '<span class="fail">✗ Non-Normal</span>')
+            role = ('<span class="primary-badge">★ Patokan</span>'
+                    if is_primary else "Pendukung")
+            sw_rows.append([n_item["label"], str(n_item["n"]),
+                            _f(n_item["sw_W"]), _p(n_item["sw_p"]), res, role])
+        st.markdown(html_tbl(sw_rows, left_cols={0,4,5}), unsafe_allow_html=True)
 
-        # Kolmogorov-Smirnov (Lilliefors)
         st.markdown(
             '<div class="sec-title">'
             'Kolmogorov-Smirnov Test (Lilliefors Significance Correction)'
             '</div>', unsafe_allow_html=True)
-        ks_rows = [["Variable","N","Statistic (D)","Sig.ᵃ","Result"]]
-        for n in R["normality"]:
-            res = ('<span class="pass">✓ Normal</span>'
-                   if n["ks_pass"] else '<span class="fail">✗ Non-Normal</span>')
-            ks_rows.append([n["label"], str(n["n"]),
-                            _f(n["ks_D"]), _p(n["ks_p"]), res])
-        st.markdown(html_tbl(ks_rows, left_cols={0,4}), unsafe_allow_html=True)
+        ks_rows = [["Variable","N","Statistic (D)","Sig.ᵃ","Result","Role"]]
+        for n_item in R["normality"]:
+            is_primary = n_item["primary"] == "ks"
+            res  = ('<span class="pass">✓ Normal</span>'
+                    if n_item["ks_pass"] else '<span class="fail">✗ Non-Normal</span>')
+            role = ('<span class="primary-badge">★ Patokan</span>'
+                    if is_primary else "Pendukung")
+            ks_rows.append([n_item["label"], str(n_item["n"]),
+                            _f(n_item["ks_D"]), _p(n_item["ks_p"]), res, role])
+        st.markdown(html_tbl(ks_rows, left_cols={0,4,5}), unsafe_allow_html=True)
         st.markdown(
-            '<p class="note-txt">'
-            'ᵃ Lilliefors Significance Correction. '
-            'Parametric test applied only when BOTH Shapiro-Wilk AND '
-            'Kolmogorov-Smirnov p > .05.</p>',
+            f'<p class="note-txt">'
+            f'ᵃ Lilliefors Significance Correction. '
+            f'<b>★ Patokan</b> = {prim_lbl} karena n {"≤" if prim_n <= 50 else ">"} 50. '
+            f'Kedua uji tetap ditampilkan sebagai informasi lengkap.</p>',
             unsafe_allow_html=True)
 
         if use_p:
             st.markdown(
-                '<div class="info-box">✅ <b>Both normality tests passed.</b> '
-                'Parametric analysis applied.</div>',
+                f'<div class="info-box">✅ <b>{prim_lbl}</b> (patokan) p > .05 → '
+                f'Parametric analysis applied.</div>',
                 unsafe_allow_html=True)
         else:
             st.markdown(
-                '<div class="warn-box">⚠️ <b>Normality violated</b> '
-                '(at least one test p ≤ .05). '
-                'Non-parametric analysis applied.</div>',
+                f'<div class="warn-box">⚠️ <b>{prim_lbl}</b> (patokan) p ≤ .05 → '
+                f'Non-parametric analysis applied.</div>',
                 unsafe_allow_html=True)
 
     # ── Tab: Descriptives ─────────────────────────────────────────────────────
@@ -1353,9 +1915,6 @@ def main():
             corr["Sig. (2-tailed)"]     = corr["Sig. (2-tailed)"].apply(_p)
             st.markdown(html_tbl(df_to_rows(corr), left_cols={0}),
                         unsafe_allow_html=True)
-            st.markdown(
-                '<p class="note-txt">Pearson r between the two paired variables.</p>',
-                unsafe_allow_html=True)
 
     # ── Tab: Levene's test ────────────────────────────────────────────────────
     if "levene" in R:
@@ -1401,7 +1960,6 @@ def main():
             ], left_cols={0,10}), unsafe_allow_html=True)
 
         elif test_type == "Paired-Sample T-Test":
-            # Correlation sub-table
             st.markdown(
                 '<div class="sec-title">Paired Samples Correlations</div>',
                 unsafe_allow_html=True)
@@ -1426,31 +1984,39 @@ def main():
                  _f(pr["cohens_d"])]
             ], left_cols={0}), unsafe_allow_html=True)
 
-        else:  # Independent
+        else:
             lev = R["levene"]
             st.markdown(
-                '<div class="sec-title">Independent Samples Test</div>',
+                '<div class="sec-title">Independent Samples Test — a) t &amp; Sig.</div>',
                 unsafe_allow_html=True)
             st.markdown(html_tbl([
                 ["","F (Levene)","Sig.","t","df","Sig. (2-tailed)",
-                 "Sig. (1-tail L)","Sig. (1-tail U)",
-                 "Mean Diff","SE Diff","95% CI Lower","95% CI Upper","Cohen's d"],
+                 "Sig. (1-tail L)","Sig. (1-tail U)"],
                 ["Equal var. assumed",
                  _f(lev["F"]), _p(lev["Sig."]),
                  _f(pr["t_eq"]), str(pr["df_eq"]), _p(pr["p_eq"]),
                  _p(stats.t.cdf(pr["t_eq"], pr["df_eq"])),
-                 _p(1-stats.t.cdf(pr["t_eq"], pr["df_eq"])),
-                 _f(pr["mean_diff"]), _f(pr["se_eq"]),
-                 _f(pr["ci_eq_l"]), _f(pr["ci_eq_u"]), _f(pr["cohens_d"])],
+                 _p(1-stats.t.cdf(pr["t_eq"], pr["df_eq"]))],
                 ["Equal var. NOT assumed","","",
                  _f(pr["t_welch"]), _f(pr["df_welch"],2), _p(pr["p_welch"]),
                  _p(stats.t.cdf(pr["t_welch"], pr["df_welch"])),
-                 _p(1-stats.t.cdf(pr["t_welch"], pr["df_welch"])),
+                 _p(1-stats.t.cdf(pr["t_welch"], pr["df_welch"]))]
+            ], left_cols={0}), unsafe_allow_html=True)
+
+            st.markdown(
+                '<div class="sec-title">Independent Samples Test — b) CI &amp; Effect Size</div>',
+                unsafe_allow_html=True)
+            st.markdown(html_tbl([
+                ["","Mean Diff","SE Diff","95% CI Lower","95% CI Upper","Cohen's d"],
+                ["Equal var. assumed",
+                 _f(pr["mean_diff"]), _f(pr["se_eq"]),
+                 _f(pr["ci_eq_l"]), _f(pr["ci_eq_u"]), _f(pr["cohens_d"])],
+                ["Equal var. NOT assumed",
                  _f(pr["mean_diff"]), _f(pr["se_welch"]),
                  _f(pr["ci_welch_l"]), _f(pr["ci_welch_u"]), "—"]
             ], left_cols={0}), unsafe_allow_html=True)
-            active = ("Row 1 (equal var.)" if lev["equal_var"]
-                      else "Row 2 (Welch)")
+
+            active = ("Row 1 (equal var.)" if lev["equal_var"] else "Row 2 (Welch)")
             st.markdown(
                 f'<p class="note-txt">Based on Levene p = {_p(lev["Sig."])}: '
                 f'use <b>{active}</b>.</p>', unsafe_allow_html=True)
@@ -1471,9 +2037,9 @@ def main():
             st.markdown(html_tbl([
                 ["Group","N","Mean Rank","Sum of Ranks"],
                 [np_r["label1"], str(np_r["n1"]),
-                 _f(np_r["mean_rank1"]), _f(np_r["R1"],1)],
+                 _f(np_r["mean_rank1"]), _f(np_r["R1"],3)],
                 [np_r["label2"], str(np_r["n2"]),
-                 _f(np_r["mean_rank2"]), _f(np_r["R2"],1)],
+                 _f(np_r["mean_rank2"]), _f(np_r["R2"],3)],
                 ["Total", str(np_r["n1"]+np_r["n2"]), "", ""]
             ], left_cols={0}), unsafe_allow_html=True)
 
@@ -1483,8 +2049,8 @@ def main():
                 '</div>', unsafe_allow_html=True)
             st.markdown(html_tbl([
                 ["Statistic","Value"],
-                ["Mann-Whitney U",         _f(np_r["U"],0)],
-                ["Wilcoxon W",             _f(np_r["W_wilcoxon"],1)],
+                ["Mann-Whitney U",         format_u(np_r["U"])],
+                ["Wilcoxon W",             _f(np_r["W_wilcoxon"],3)],
                 ["Z",                      _f(np_r["Z"])],
                 ["Asymp. Sig. (2-tailed)", _p(np_r["p"])],
             ], left_cols={0}), unsafe_allow_html=True)
@@ -1518,9 +2084,9 @@ def main():
             st.markdown(html_tbl([
                 ["","N","Mean Rank","Sum of Ranks"],
                 ["Negative Ranks" + (" ᵃ" if footnotes else ""),
-                 str(n_neg), _f(neg_mr), _f(neg_rs,1)],
+                 str(n_neg), _f(neg_mr), _f(neg_rs,3)],
                 ["Positive Ranks" + (" ᵇ" if footnotes else ""),
-                 str(n_pos), _f(pos_mr), _f(pos_rs,1)],
+                 str(n_pos), _f(pos_mr), _f(pos_rs,3)],
                 ["Ties" + (" ᶜ" if footnotes else ""),
                  str(n_ties),"",""],
                 ["Total", str(n_tot),"",""]
@@ -1634,7 +2200,7 @@ def main():
                     f"A Mann-Whitney U test compared "
                     f"{np_r['dep_var']} between "
                     f"{np_r['label1']} and {np_r['label2']}, "
-                    f"U = {np_r['U']:.0f}, W = {np_r['W_wilcoxon']:.1f}, "
+                    f"U = {format_u(np_r['U'])}, W = {_f(np_r['W_wilcoxon'],3)}, "
                     f"Z = {np_r['Z']:.3f}, "
                     f"p {'< .001' if np_r['p']<.001 else '= '+_p(np_r['p'])} "
                     f"(asymptotic, 2-tailed)."
@@ -1651,7 +2217,7 @@ def main():
     # ── Downloads ─────────────────────────────────────────────────────────────
     st.markdown("---")
     st.markdown("### 📥 Download Results")
-    dc1, dc2, dc3 = st.columns(3)
+    dc1, dc2, dc3, dc4 = st.columns(4)
 
     with dc1:
         with st.spinner("Building PDF…"):
@@ -1668,16 +2234,16 @@ def main():
         with pd.ExcelWriter(xbuf, engine="openpyxl") as writer:
             R["desc"].to_excel(
                 writer, sheet_name="Descriptive Statistics", index=False)
-            # Normality table (both tests)
             norm_rows = []
-            for n in R["normality"]:
+            for n_item in R["normality"]:
                 norm_rows.append({
-                    "Variable":  n["label"], "N": n["n"],
-                    "SW W":      n["sw_W"],  "SW Sig.":  n["sw_p"],
-                    "SW Normal": n["sw_pass"],
-                    "KS D":      n["ks_D"],  "KS Sig.":  n["ks_p"],
-                    "KS Normal": n["ks_pass"],
-                    "Pass (both)": n["pass"]
+                    "Variable":    n_item["label"], "N": n_item["n"],
+                    "SW W":        n_item["sw_W"],  "SW Sig.":  n_item["sw_p"],
+                    "SW Normal":   n_item["sw_pass"],
+                    "KS D":        n_item["ks_D"],  "KS Sig.":  n_item["ks_p"],
+                    "KS Normal":   n_item["ks_pass"],
+                    "Primary Test": n_item["primary_label"],
+                    "Decision (primary)": "Normal" if n_item["pass"] else "Non-Normal"
                 })
             pd.DataFrame(norm_rows).to_excel(
                 writer, sheet_name="Normality Tests", index=False)
@@ -1689,7 +2255,9 @@ def main():
                     writer, sheet_name="Levene Test", index=False)
             pd.DataFrame([R["parametric"]]).to_excel(
                 writer, sheet_name="Parametric Results", index=False)
-            pd.DataFrame([R["nonparametric"]]).to_excel(
+            np_export = {k: (format_u(v) if k == "U" else v)
+                         for k, v in R["nonparametric"].items()}
+            pd.DataFrame([np_export]).to_excel(
                 writer, sheet_name="Non-Parametric Results", index=False)
         xbuf.seek(0)
         st.download_button(
@@ -1702,17 +2270,20 @@ def main():
 
     with dc3:
         norm_df_rows = []
-        for n in R["normality"]:
+        for n_item in R["normality"]:
             norm_df_rows.append({
-                "Variable": n["label"], "N": n["n"],
-                "SW_W": n["sw_W"], "SW_p": n["sw_p"], "SW_pass": n["sw_pass"],
-                "KS_D": n["ks_D"], "KS_p": n["ks_p"], "KS_pass": n["ks_pass"],
-                "pass_both": n["pass"]
+                "Variable":     n_item["label"], "N": n_item["n"],
+                "SW_W":         n_item["sw_W"],  "SW_p": n_item["sw_p"],
+                "SW_pass":      n_item["sw_pass"],
+                "KS_D":         n_item["ks_D"],  "KS_p": n_item["ks_p"],
+                "KS_pass":      n_item["ks_pass"],
+                "Primary_test": n_item["primary_label"],
+                "pass_primary": n_item["pass"]
             })
         parts = [f"=== {test_type.upper()} ===\n"]
         parts.append("=== DESCRIPTIVE STATISTICS ===\n" +
                      R["desc"].to_csv(index=False))
-        parts.append("=== NORMALITY TESTS (SW + KS) ===\n" +
+        parts.append("=== NORMALITY TESTS (SW + KS, with Primary indicator) ===\n" +
                      pd.DataFrame(norm_df_rows).to_csv(index=False))
         if "correlation" in R:
             parts.append("=== PAIRED CORRELATION ===\n" +
@@ -1722,14 +2293,26 @@ def main():
                          pd.DataFrame([R["levene"]]).to_csv(index=False))
         parts.append("=== PARAMETRIC RESULTS ===\n" +
                      pd.DataFrame([R["parametric"]]).to_csv(index=False))
+        np_csv = {k: (format_u(v) if k == "U" else v)
+                  for k, v in R["nonparametric"].items()}
         parts.append("=== NON-PARAMETRIC RESULTS ===\n" +
-                     pd.DataFrame([R["nonparametric"]]).to_csv(index=False))
+                     pd.DataFrame([np_csv]).to_csv(index=False))
         st.download_button(
             "📝 CSV Tables",
             "\n\n".join(parts).encode(),
             f"Stats_{test_type.replace(' ','_')}_"
             f"{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
             "text/csv", use_container_width=True)
+
+    with dc4:
+        with st.spinner("Building HTML…"):
+            html_data = build_html_report(test_type, R, meta, interps, figs_b)
+        st.download_button(
+            "🌐 HTML Offline",
+            html_data,
+            f"Stats_{test_type.replace(' ','_')}_"
+            f"{datetime.now().strftime('%Y%m%d_%H%M%S')}.html",
+            "text/html", use_container_width=True)
 
 
 if __name__ == "__main__":
