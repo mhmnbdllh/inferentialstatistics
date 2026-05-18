@@ -120,8 +120,8 @@ SAMPLES = {
 13,76
 14,89
 15,80""",
-        "desc": "Test whether the mean **score** differs from a known population value (μ₀).",
-        "note": "One numeric column required. Set your test value (μ₀) in the sidebar."
+        "desc": "Test whether the mean <b>score</b> differs from a known population value (\u03bc\u2080).",
+        "note": "One numeric column required. Set your test value (\u03bc\u2080) in the sidebar."
     },
     "Paired-Sample T-Test": {
         "csv": """subject_id,pre_score,post_score
@@ -140,7 +140,7 @@ SAMPLES = {
 13,69,75
 14,73,80
 15,67,72""",
-        "desc": "Test whether the mean difference between **pre_score** and **post_score** is zero.",
+        "desc": "Test whether the mean difference between <b>pre_score</b> and <b>post_score</b> is zero.",
         "note": "Two numeric columns required: Variable 1 (pre) and Variable 2 (post)."
     },
     "Independent-Sample T-Test": {
@@ -161,7 +161,7 @@ SAMPLES = {
 14,Treatment,77
 15,Treatment,73
 16,Treatment,79""",
-        "desc": "Test whether **score** means differ between **Control** and **Treatment** groups.",
+        "desc": "Test whether <b>score</b> means differ between <b>Control</b> and <b>Treatment</b> groups.",
         "note": "One grouping column (categorical) and one numeric outcome column required."
     }
 }
@@ -1393,17 +1393,21 @@ def build_html_report(test_type, R, meta, interps, fig_bytes_list):
                     if not (np.isnan(ci_lo_h) or np.isnan(ci_hi_h)) else ".")
         np_es_html = rtbl([
             ["Test","Comparison","Rank-Biserial r",
-             "95% Bootstrap CI","Effect Size","Interpretation"],
+             "95% Bootstrap CI","Effect Size"],
             [es_label_h, pair_desc_h,
              _f(r_rb_h) if not np.isnan(r_rb_h) else ".",
-             ci_str_h, r_lab_h,
-             "|r|\u2009<\u2009.10 negligible, .10\u2013.29 small, "
-             ".30\u2013.49 medium, \u2265\u2009.50 large"]
-        ], left_cols={0,1,5})
-        np_es_html += ('<p class="tbl-note">Rank-biserial correlation r is a '
-                       'non-parametric effect size not reported by SPSS by default. '
-                       'Bootstrap 95% CI based on 2,000 resamples '
-                       '(Efron &amp; Tibshirani, 1993; Kerby, 2014).</p>')
+             ci_str_h, r_lab_h]
+        ], left_cols={0,1})
+        np_es_html += ('<p class="tbl-note">'
+                       'Rank-biserial r \u2208 [\u22121,\u20091]: '
+                       '|r|\u2009&lt;\u2009.10 negligible, '
+                       '.10\u2013.29 small, '
+                       '.30\u2013.49 medium, '
+                       '\u2265\u2009.50 large. '
+                       'Rank-biserial correlation r is a non-parametric effect size '
+                       'not reported by SPSS by default. Bootstrap 95% CI based on '
+                       '2,000 resamples (Efron &amp; Tibshirani, 1993; Kerby, 2014).'
+                       '</p>')
     except Exception:
         np_es_html = '<p class="tbl-note">Effect size not available.</p>'
 
@@ -2376,20 +2380,20 @@ def main():
 
         st.markdown(html_tbl([
             ["Test","Comparison","Rank-Biserial r",
-             "95% Bootstrap CI","Effect Size","Interpretation"],
+             "95% Bootstrap CI","Effect Size"],
             [es_label, pair_desc,
              _f(r_rb) if not np.isnan(r_rb) else ".",
              (f"[{_f(ci_lo)}, {_f(ci_hi)}]"
               if not (np.isnan(ci_lo) or np.isnan(ci_hi)) else "."),
-             r_lab,
-             "Rank-biserial r \u2208 [\u22121,\u20091]; "
-             "|r|\u2009<\u2009.10 negligible, "
-             ".10\u2013.29 small, "
-             ".30\u2013.49 medium, "
-             "\u2265\u2009.50 large"]
-        ], left_cols={0,1,5}), unsafe_allow_html=True)
+             r_lab]
+        ], left_cols={0,1}), unsafe_allow_html=True)
         st.markdown(
             '<p class="note-txt">'
+            'Rank-biserial r \u2208 [\u22121,\u20091]: '
+            '|r|\u2009&lt;\u2009.10 negligible, '
+            '.10\u2013.29 small, '
+            '.30\u2013.49 medium, '
+            '\u2265\u2009.50 large. '
             'Rank-biserial correlation r is a non-parametric effect size not '
             'reported by SPSS by default. Bootstrap 95% CI based on 2,000 '
             'resamples (Efron &amp; Tibshirani, 1993; Kerby, 2014).'
