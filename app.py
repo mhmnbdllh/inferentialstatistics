@@ -54,6 +54,9 @@ html,body,[class*="css"]{font-family:'DM Sans',sans-serif;}
   padding:9px 16px;border-radius:6px 6px 0 0;font-weight:600;font-size:.84rem;
   letter-spacing:.6px;margin-top:1.4rem;font-family:'DM Mono',monospace;
   border-bottom:2px solid #e94560;}
+.sub-title{background:#f1f5f9;color:#1a1a2e;padding:7px 14px;border-radius:6px;
+  font-weight:600;font-size:.82rem;margin:1rem 0 .4rem;
+  border-left:3px solid #e94560;}
 .spss-wrap{overflow-x:auto;margin-bottom:.4rem;}
 .spss-tbl{font-family:'DM Mono',monospace;font-size:.77rem;border-collapse:collapse;
   width:100%;min-width:400px;}
@@ -297,7 +300,10 @@ def test_normality(data, label=""):
     result["sw_pass"] = float(sw_p) > 0.05
 
     try:
-        ks_D, ks_p = lilliefors(data, dist='norm', pvalmethod='approx')
+        # Use 'table' for n<=50 (matches SPSS Lilliefors table interpolation)
+        # Use 'approx' for n>50  (asymptotic approximation, accurate for large n)
+        ks_method = 'table' if n <= 50 else 'approx'
+        ks_D, ks_p = lilliefors(data, dist='norm', pvalmethod=ks_method)
         result["ks_D"]    = float(ks_D)
         result["ks_p"]    = float(ks_p)
         result["ks_pass"] = float(ks_p) >= 0.05
@@ -1274,7 +1280,125 @@ def build_html_report(test_type, R, meta, interps, fig_bytes_list):
         meta_html += f"<tr><td class='mk'>{k}</td><td class='mv'>{v}</td></tr>"
     meta_html += "</table>"
 
-    # ── optional sections ──────────────────────────────────────────────────────
+    # ── assumption summary for HTML ────────────────────────────────────────────
+    assume_rows_html = [["Assumption","Test / Criterion","Result","Decision"]]
+    for nm in R["normality"]:
+        passed = nm["pass"]
+        sw_res = f"SW W\u2009=\u2009{_f(nm['sw_W'])}, p\u2009=\u2009{_p(nm['sw_p'])}"
+        ks_res = f"KS D\u2009=\u2009{_f(nm['ks_D'])}, p\u2009=\u2009{_p(nm['ks_p'])}"
+        assume_rows_html.append([
+            f"Normality \u2014 {nm['label']}",
+            f"{sw_res} | {ks_res} (primary: {nm['primary_label']})",
+            "\u2713 Satisfied" if passed else "\u2717 Violated",
+            "Parametric eligible" if passed else "Non-parametric required"
+        ])
+    if "levene" in R:
+        lv2 = R["levene"]
+        assume_rows_html.append([
+            "Homogeneity of Variance",
+            f"Levene F({lv2['df1']},\u2009{lv2['df2']})\u2009=\u2009{_f(lv2['F'])}, "
+            f"p\u2009=\u2009{_p(lv2['Sig.'])}",
+            "\u2713 Satisfied" if lv2["equal_var"] else "\u2717 Violated",
+            "Equal variances assumed" if lv2["equal_var"]
+            else "Welch correction applied"
+        ])
+    assume_rows_html.append([
+        "Independence of Observations",
+        "By research design (not statistically testable)",
+        "\u2139 Assumed",
+        "Must be ensured by design"
+    ])
+    assume_rows_html.append([
+        "Overall Decision",
+        f"Primary criterion: {prim_lbl}",
+        "Parametric" if use_p else "Non-parametric",
+        "T-Test family" if use_p else "Wilcoxon / Mann-Whitney U"
+    ])
+
+    # ── non-parametric effect size for HTML ────────────────────────────────────
+    try:
+        cfg_s = meta  # use meta dict to get labels
+        if test_type == "Independent-Sample T-Test":
+            r_rb  = 1 - (2 * np_r["U1"]) / (np_r["n1"] * np_r["n2"])
+            ci_lo_es = ci_hi_es = np.nan  # bootstrap needs raw data, skip in HTML
+            es_label = "Mann-Whitney U"
+            pair_desc_es = f"{np_r['label1']} vs. {np_r['label2']}"
+        else:
+            n_nz = np_r.get("n_pos",0) + np_r.get("n_neg",0)
+            pos_rs = np_r.get("pos_rank_sum", 0)
+            neg_rs = np_r.get("neg_rank_sum", 0)
+            total_rs = pos_rs + neg_rs
+            r_rb = (pos_rs - neg_rs) / total_rs if total_rs > 0 else np.nan
+            ci_lo_es = ci_hi_es = np.nan
+            es_label = "Wilcoxon Signed-Rank"
+            if test_type == "Paired-Sample T-Test":
+                pair_desc_es = f"{pr['label1']} \u2212 {pr['label2']}"
+            else:
+                pair_desc_es = f"Variable \u2212 \u03bc\u2080"
+        r_lab_es = effect_label_r_nonparam(r_rb) if not np.isnan(r_rb) else "N/A"
+        np_es_html = rtbl([
+            ["Test","Comparison","Rank-Biserial r","Effect Size","Interpretation"],
+            [es_label, pair_desc_es,
+             _f(r_rb) if not np.isnan(r_rb) else ".",
+             r_lab_es,
+             "|r|\u2009<\u2009.10 negligible, .10\u2013.29 small, "
+             ".30\u2013.49 medium, \u2265\u2009.50 large"]
+        ], left_cols={0,1,4})
+        np_es_html += ('<p class="tbl-note">Rank-biserial correlation r is a '
+                       'non-parametric effect size not reported by SPSS by default. '
+                       'Reference: Kerby (2014).</p>')
+    except Exception:
+        np_es_html = '<p class="tbl-note">Effect size not available.</p>'
+
+    # ── power analysis for HTML ────────────────────────────────────────────────
+    try:
+        pw = compute_power(test_type, R, alpha)
+        pwr_val = pw.get("power", np.nan)
+        pwr_pct = f"{pwr_val*100:.1f}%" if not np.isnan(pwr_val) else "N/A"
+        pwr_lbl = pw.get("power_label", "N/A")
+        pwr_eff = pw.get("effect_size", np.nan)
+        pwr_typ = pw.get("effect_type", "\u2014")
+        if "n1" in pw:
+            pwr_n = f"n\u2081\u2009=\u2009{pw['n1']}, n\u2082\u2009=\u2009{pw['n2']}"
+        else:
+            pwr_n = f"n\u2009=\u2009{pw.get('n','N/A')}"
+        if not np.isnan(pwr_val):
+            bar_c = ("#16a34a" if pwr_val >= .80
+                     else "#f59e0b" if pwr_val >= .60 else "#dc2626")
+            bar_p = int(pwr_val * 100)
+            pwr_bar = (f'<div style="background:#e2e8f0;border-radius:8px;'
+                       f'height:16px;width:100%;margin:10px 0;">'
+                       f'<div style="background:{bar_c};width:{bar_p}%;'
+                       f'height:16px;border-radius:8px;"></div></div>')
+        else:
+            pwr_bar = ""
+        pwr_rows = [
+            ["Parameter","Value"],
+            ["Sample size", pwr_n],
+            ["Observed effect size", f"{_f(pwr_eff)} ({pwr_typ})"],
+            ["Significance level (\u03b1)", str(alpha)],
+            ["Achieved statistical power", pwr_pct],
+            ["Power classification", pwr_lbl],
+            ["Recommended minimum power", "\u2265\u2009.80 (Cohen, 1988)"]
+        ]
+        pwr_html = rtbl(pwr_rows, left_cols={0}) + pwr_bar
+        if not np.isnan(pwr_val) and pwr_val < .80:
+            pwr_html += ('<div class="warn-box" style="margin-top:10px;">'
+                         'Achieved power is below the conventional threshold of '
+                         '.80, indicating an elevated risk of Type II error. '
+                         'Consider increasing the sample size.</div>')
+        elif not np.isnan(pwr_val):
+            pwr_html += ('<div class="info-box" style="margin-top:10px;">'
+                         'Achieved power meets or exceeds the conventional '
+                         'threshold of .80.</div>')
+        pwr_html += ('<p class="tbl-note">Post-hoc power analysis using the '
+                     'non-central t-distribution (parametric) or normal '
+                     'approximation (non-parametric). '
+                     'Reference: Cohen (1988).</p>')
+    except Exception:
+        pwr_html = '<p class="tbl-note">Power analysis not available.</p>'
+
+    # ── section numbering ──────────────────────────────────────────────────────
     sn = 3
     corr_sec = ""
     if "correlation" in R:
@@ -1301,7 +1425,8 @@ def build_html_report(test_type, R, meta, interps, fig_bytes_list):
         )
         sn += 1
 
-    ps=sn; sn+=1; ns=sn; sn+=1; ins=sn; sn+=1; fgs=sn
+    ps=sn; sn+=1; ns=sn; sn+=1; es_sec_n=sn; sn+=1
+    ins=sn; sn+=1; pw_sec_n=sn; sn+=1; fgs=sn
 
     dcls = "use-param" if use_p else "use-nonparam"
     dtxt = (f"Primary normality criterion: <b>{prim_lbl}</b> "
@@ -1367,6 +1492,10 @@ body{font-family:'DM Sans',sans-serif;background:#f0f4f8;color:#1e293b;font-size
   text-transform:uppercase;letter-spacing:.8px;margin-bottom:6px;}
 .fig-wrap{text-align:center;margin:18px 0;}
 .fig-cap{font-size:.75rem;color:#64748b;font-style:italic;margin-top:10px;line-height:1.6;}
+.warn-box{background:#fffbeb;border-left:4px solid #f59e0b;padding:.7rem 1rem;
+  border-radius:0 6px 6px 0;font-size:.82rem;color:#92400e;margin:.4rem 0;}
+.info-box{background:#eff6ff;border-left:4px solid #3b82f6;padding:.7rem 1rem;
+  border-radius:0 6px 6px 0;font-size:.82rem;color:#1e40af;margin:.4rem 0;}
 .footer{text-align:center;color:#94a3b8;font-size:.72rem;margin-top:44px;
   padding-top:16px;border-top:1px solid #e2e8f0;line-height:1.8;}
 @media print{body{background:#fff;}.page{padding:0 16px;}.cover{border-radius:0;}}
@@ -1405,8 +1534,14 @@ body{font-family:'DM Sans',sans-serif;background:#f0f4f8;color:#1e293b;font-size
   {rtbl(sw_rows)}
   {sub("b) Kolmogorov-Smirnov Test (Lilliefors Significance Correction)")}
   {rtbl(ks_rows)}
-  <p class="tbl-note">\u1d43 Lilliefors significance correction applied.</p>
+  <p class="tbl-note">\u1d43 Lilliefors significance correction applied.
+  For n\u2009\u2264\u200950: p-value from Lilliefors table (SPSS-equivalent).
+  For n\u2009&gt;\u200950: asymptotic approximation.</p>
   {rec(norm_rec)}
+  {sub("Assumption Summary")}
+  {rtbl(assume_rows_html, left_cols={{0,1,3}})}
+  <p class="tbl-note">Independence of observations cannot be formally tested
+  and must be ensured through appropriate research design.</p>
 </div>
 
 <div class="section">
@@ -1425,6 +1560,8 @@ body{font-family:'DM Sans',sans-serif;background:#f0f4f8;color:#1e293b;font-size
 <div class="section">
   <div class="sec-hdr"><span class="sec-num">{ns}</span>NON-PARAMETRIC TEST RESULTS</div>
   {np_html}
+  {sub("Non-Parametric Effect Size &mdash; Rank-Biserial Correlation (r)")}
+  {np_es_html}
 </div>
 
 <div class="section">
@@ -1437,6 +1574,11 @@ body{font-family:'DM Sans',sans-serif;background:#f0f4f8;color:#1e293b;font-size
 </div>
 
 <div class="section">
+  <div class="sec-hdr"><span class="sec-num">{pw_sec_n}</span>STATISTICAL POWER ASSESSMENT</div>
+  {pwr_html}
+</div>
+
+<div class="section">
   <div class="sec-hdr"><span class="sec-num">{fgs}</span>FIGURES &amp; DIAGNOSTIC PLOTS</div>
   {figs_html}
 </div>
@@ -1444,7 +1586,7 @@ body{font-family:'DM Sans',sans-serif;background:#f0f4f8;color:#1e293b;font-size
 <div class="footer">
   Generated by Inferential Statistics App &nbsp;&middot;&nbsp;
   SPSS-equivalent output &nbsp;&middot;&nbsp;
-  KS with Lilliefors correction &nbsp;&middot;&nbsp;
+  KS Lilliefors: table method (n\u2009\u2264\u200950), approx method (n\u2009&gt;\u200950) &nbsp;&middot;&nbsp;
   Levene center\u2009=\u2009mean &nbsp;&middot;&nbsp;
   Wilcoxon Z ties-corrected &nbsp;&middot;&nbsp;
   Mann-Whitney U SPSS-exact &nbsp;&middot;&nbsp;
@@ -1972,9 +2114,11 @@ def main():
         else:
             lev = R["levene"]
             st.markdown(
-                '<div class="sec-title">Independent Samples Test '
-                '&nbsp;&middot;&nbsp; a) t-Statistics and Significance'
-                '</div>', unsafe_allow_html=True)
+                '<div class="sec-title">Independent Samples T-Test</div>',
+                unsafe_allow_html=True)
+            st.markdown(
+                '<div class="sub-title">a) t-Statistics and Significance</div>',
+                unsafe_allow_html=True)
             st.markdown(html_tbl([
                 ["","F (Levene)","Sig.","t","df","Sig. (2-tailed)",
                  "Sig. (1-tailed L)","Sig. (1-tailed U)"],
@@ -1988,7 +2132,7 @@ def main():
             ], left_cols={0}), unsafe_allow_html=True)
 
             st.markdown(
-                '<div class="sec-title">'
+                '<div class="sub-title">'
                 'b) Mean Difference, Confidence Interval, and Effect Size'
                 '</div>', unsafe_allow_html=True)
             st.markdown(html_tbl([
@@ -2108,7 +2252,7 @@ def main():
         # ── Non-parametric Effect Size: Rank-Biserial r ────────────────────────
         st.markdown(
             '<div class="sec-title">'
-            '&#128200; Non-Parametric Effect Size &nbsp;&middot;&nbsp; '
+            'Non-Parametric Effect Size &nbsp;&middot;&nbsp; '
             'Rank-Biserial Correlation (r)'
             '</div>', unsafe_allow_html=True)
 
