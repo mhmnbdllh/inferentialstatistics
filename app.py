@@ -1575,11 +1575,9 @@ body{font-family:'DM Sans',sans-serif;background:#f0f4f8;color:#1e293b;font-size
   For n\u2009\u2264\u200950: p-value from Lilliefors table (SPSS-equivalent).
   For n\u2009&gt;\u200950: asymptotic approximation.</p>
   <div class="warn-box" style="margin:10px 0;font-size:.79rem;">
-  <b>Note on KS p-value:</b> The Kolmogorov-Smirnov D statistic is identical
-  to SPSS. The p-value is computed using the Lilliefors significance correction
+  <b>Note on KS p-value:</b> The p-value on Kolmogorov-Smirnov is computed using the Lilliefors significance correction
   (statsmodels). Minor discrepancies with SPSS p-values may occur due to
   differences in table interpolation implementations between software packages.
-  This does not affect the normality decision in the vast majority of cases.
   </div>
   {rec(norm_rec)}
   {sub("Assumption Summary")}
@@ -2018,12 +2016,10 @@ def main():
         # ── KS Disclaimer ─────────────────────────────────────────────────────
         st.markdown(
             '<div class="info-box" style="margin-top:.6rem;">'
-            '<b>Note on KS p-value:</b> The Kolmogorov-Smirnov D statistic '
-            'is identical to SPSS. The p-value is computed using the Lilliefors '
+            '<b>Note on KS p-value:</b> The p-value on Kolmogorov-Smirnov is computed using the Lilliefors '
             'significance correction (statsmodels). Minor discrepancies with '
             'SPSS p-values may occur due to differences in table interpolation '
-            'implementations between software packages. This does not affect '
-            'the normality decision in the vast majority of cases.'
+            'implementations between software packages.'
             '</div>',
             unsafe_allow_html=True)
 
@@ -2610,7 +2606,7 @@ def main():
                     "KS Result":             "Normal" if n_item["ks_pass"] else "Non-Normal",
                     "Primary Criterion":     n_item["primary_label"],
                     "Normality Decision":    "Normal" if n_item["pass"] else "Non-Normal",
-                    "KS Note":               "D statistic identical to SPSS. Minor p-value discrepancy may occur due to differing interpolation implementations.",
+                    "KS Note":               "Minor p-value on Kolmogorov-Smirnov discrepancy may occur due to differing interpolation implementations.",
                     "Recommendation":        normality_recommendation_plain(total_n_xls)
                 })
             pd.DataFrame(norm_rows_xls).to_excel(
