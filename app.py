@@ -221,77 +221,95 @@ def cohens_d_ind(g1, g2):
 # ══════════════════════════════════════════════════════════════════════════════
 # NORMALITY RECOMMENDATION NOTE
 # ══════════════════════════════════════════════════════════════════════════════
-def normality_recommendation_note(n):
+def normality_recommendation_note(total_n):
     """
-    Returns an academic-English recommendation note explaining which
-    normality test is appropriate given the sample size, and why.
+    Academic-English recommendation note for normality test selection.
+    Decision based on TOTAL N of the analysis (not per-group n).
+    Threshold: total_n < 50 → Shapiro-Wilk; total_n >= 50 → KS Lilliefors.
     """
-    if n <= 50:
+    if total_n < 50:
         return (
-            f"<b>Normality Test Recommendation (n\u2009=\u2009{n}):</b> "
-            "Given a small sample size (n\u2009\u2264\u200950), the "
+            f"<b>Normality Test Recommendation (Total N\u2009=\u2009{total_n}):</b> "
+            "Given a total sample size of fewer than 50 observations, the "
             "<b>Shapiro-Wilk test</b> is recommended as the primary criterion "
             "for assessing normality. The Shapiro-Wilk test is widely regarded "
-            "as the most powerful test for normality in small samples, exhibiting "
-            "superior sensitivity to departures from normality compared to the "
-            "Kolmogorov-Smirnov test (Razali &amp; Wah, 2011; Shapiro &amp; Wilk, 1965). "
+            "as the most powerful test for detecting departures from normality "
+            "in small to moderate samples "
+            "(Razali &amp; Wah, 2011; Shapiro &amp; Wilk, 1965). "
             "The Kolmogorov-Smirnov result is reported for informational purposes."
         )
     else:
         return (
-            f"<b>Normality Test Recommendation (n\u2009=\u2009{n}):</b> "
-            "Given a larger sample size (n\u2009&gt;\u200950), the "
+            f"<b>Normality Test Recommendation (Total N\u2009=\u2009{total_n}):</b> "
+            "Given a total sample size of 50 or more observations, the "
             "<b>Kolmogorov-Smirnov test with Lilliefors significance correction</b> "
             "is recommended as the primary criterion. For larger samples, "
-            "the Shapiro-Wilk test may become overly sensitive, flagging trivial "
-            "deviations from normality as statistically significant. "
+            "the Shapiro-Wilk test may become overly sensitive, flagging "
+            "trivial deviations from normality as statistically significant. "
             "The Lilliefors-corrected K-S test provides a more appropriate "
-            "assessment in this context (Lilliefors, 1967; Field, 2018). "
+            "assessment in this context "
+            "(Lilliefors, 1967; Field, 2018; Razali &amp; Wah, 2011). "
             "The Shapiro-Wilk result is reported for informational purposes."
         )
 
-def normality_recommendation_plain(n):
-    """Plain-text version for HTML report body (no HTML tags)."""
-    if n <= 50:
+
+def normality_recommendation_plain(total_n):
+    """Plain-text version for HTML report and Excel export."""
+    if total_n < 50:
         return (
-            f"Normality Test Recommendation (n = {n}): "
-            "Given a small sample size (n \u2264 50), the Shapiro-Wilk test is "
-            "recommended as the primary criterion. The Shapiro-Wilk test exhibits "
-            "superior sensitivity to departures from normality in small samples "
+            f"Normality Test Recommendation (Total N = {total_n}): "
+            "Given a total sample size of fewer than 50 observations, the "
+            "Shapiro-Wilk test is recommended as the primary criterion. "
+            "The Shapiro-Wilk test exhibits superior sensitivity to departures "
+            "from normality in small to moderate samples "
             "(Razali & Wah, 2011; Shapiro & Wilk, 1965). "
             "The Kolmogorov-Smirnov result is reported for informational purposes."
         )
     else:
         return (
-            f"Normality Test Recommendation (n = {n}): "
-            "Given a larger sample size (n > 50), the Kolmogorov-Smirnov test "
-            "with Lilliefors significance correction is recommended as the primary "
-            "criterion. For larger samples, the Shapiro-Wilk test may be "
-            "overly sensitive to trivial deviations from normality "
-            "(Lilliefors, 1967; Field, 2018). "
+            f"Normality Test Recommendation (Total N = {total_n}): "
+            "Given a total sample size of 50 or more observations, the "
+            "Kolmogorov-Smirnov test with Lilliefors significance correction "
+            "is recommended as the primary criterion. For larger samples, "
+            "the Shapiro-Wilk test may be overly sensitive to trivial "
+            "deviations from normality "
+            "(Lilliefors, 1967; Field, 2018; Razali & Wah, 2011). "
             "The Shapiro-Wilk result is reported for informational purposes."
         )
 
 # ══════════════════════════════════════════════════════════════════════════════
 # NORMALITY TESTS
 # ══════════════════════════════════════════════════════════════════════════════
-def test_normality(data, label=""):
+def test_normality(data, label="", total_n=None):
     """
     Shapiro-Wilk + Kolmogorov-Smirnov (Lilliefors correction).
-    Primary decision criterion:
-      n <= 50 : Shapiro-Wilk (recommended for small samples)
-      n >  50 : KS with Lilliefors correction (recommended for larger samples)
-    Both tests always computed and reported.
+
+    Primary decision criterion is based on TOTAL N of the analysis:
+      total_n <  50 : Shapiro-Wilk recommended (superior power for small samples)
+      total_n >= 50 : Kolmogorov-Smirnov recommended (Lilliefors correction)
+
+    For Independent-Sample T-Test, total_n = n1 + n2 (not per-group n).
+    For One-Sample and Paired tests, total_n = n of the variable/difference.
+
+    References:
+      Razali & Wah (2011). Power comparisons of Shapiro-Wilk,
+        Kolmogorov-Smirnov, Lilliefors and Anderson-Darling tests.
+        Journal of Statistical Modeling and Analytics, 2(1), 21-33.
+      Field (2018). Discovering Statistics Using IBM SPSS Statistics (5th ed.).
     """
-    data = np.array(data, dtype=float)
-    n = len(data)
-    result = {"label": label, "n": n}
+    data    = np.array(data, dtype=float)
+    n       = len(data)
+    # If total_n not provided, fall back to per-group n
+    n_ref   = total_n if total_n is not None else n
+    result  = {"label": label, "n": n, "total_n": n_ref}
 
     if n < 3:
-        result.update({"sw_W": np.nan, "sw_p": np.nan, "sw_pass": False,
-                       "ks_D": np.nan, "ks_p": np.nan, "ks_pass": False,
-                       "pass": False, "primary": "sw",
-                       "primary_label": "Shapiro-Wilk"})
+        result.update({
+            "sw_W": np.nan, "sw_p": np.nan, "sw_pass": False,
+            "ks_D": np.nan, "ks_p": np.nan, "ks_pass": False,
+            "pass": False, "primary": "sw",
+            "primary_label": "Shapiro-Wilk"
+        })
         return result
 
     sw_W, sw_p = stats.shapiro(data)
@@ -300,9 +318,9 @@ def test_normality(data, label=""):
     result["sw_pass"] = float(sw_p) > 0.05
 
     try:
-        # Use 'table' for n<=50 (matches SPSS Lilliefors table interpolation)
-        # Use 'approx' for n>50  (asymptotic approximation, accurate for large n)
-        ks_method = 'table' if n <= 50 else 'approx'
+        # 'table'  → matches SPSS Lilliefors table for small n
+        # 'approx' → asymptotic approximation for larger n
+        ks_method = 'table' if n_ref < 50 else 'approx'
         ks_D, ks_p = lilliefors(data, dist='norm', pvalmethod=ks_method)
         result["ks_D"]    = float(ks_D)
         result["ks_p"]    = float(ks_p)
@@ -312,7 +330,8 @@ def test_normality(data, label=""):
         result["ks_p"]    = np.nan
         result["ks_pass"] = True
 
-    if n <= 50:
+    # Primary criterion based on TOTAL N
+    if n_ref < 50:
         result["primary"]       = "sw"
         result["primary_label"] = "Shapiro-Wilk"
         result["pass"]          = result["sw_pass"]
@@ -683,10 +702,11 @@ def run_independent(g1, g2, label1="Group 1", label2="Group 2",
          "Kurtosis": float(stats.kurtosis(g2))},
     ])
 
-    n1_res = test_normality(g1, label1)
-    n2_res = test_normality(g2, label2)
+    n1_res = test_normality(g1, label1, total_n=n1+n2)
+    n2_res = test_normality(g2, label2, total_n=n1+n2)
     R["normality"]  = [n1_res, n2_res]
     R["use_param"]  = n1_res["pass"] and n2_res["pass"]
+    R["total_n"]    = n1 + n2
 
     lev_f, lev_p = stats.levene(g1, g2, center='mean')
     R["levene"] = {
@@ -1039,6 +1059,7 @@ def build_html_report(test_type, R, meta, interps, fig_bytes_list):
     use_p = R["use_param"]
     prim_n   = R["normality"][0]["n"]
     prim_lbl = R["normality"][0]["primary_label"]
+    total_n  = R.get("total_n", prim_n)   # total N for methodology decision
 
     # ── helpers ────────────────────────────────────────────────────────────────
     def rtbl(rows, left_cols=None):
@@ -1071,14 +1092,7 @@ def build_html_report(test_type, R, meta, interps, fig_bytes_list):
                         "\u2713 Normal" if nm["ks_pass"] else "\u2717 Non-Normal"])
 
     # Also build per-group recommendation for HTML
-    if test_type == "Independent-Sample T-Test":
-        norm_rec_parts = []
-        for nm in R["normality"]:
-            note = normality_recommendation_plain(nm["n"])
-            norm_rec_parts.append(f"{nm['label']}: {note}")
-        norm_rec = " | ".join(norm_rec_parts)
-    else:
-        norm_rec = normality_recommendation_plain(prim_n)
+    norm_rec = normality_recommendation_plain(total_n)
 
     # ── descriptives ───────────────────────────────────────────────────────────
     dd = R["desc"].copy()
@@ -1438,8 +1452,8 @@ def build_html_report(test_type, R, meta, interps, fig_bytes_list):
 
     dcls = "use-param" if use_p else "use-nonparam"
     dtxt = (f"Primary normality criterion: <b>{prim_lbl}</b> "
-            f"(n\u2009=\u2009{prim_n}, "
-            f"{'n\u2009\u2264\u200950' if prim_n <= 50 else 'n\u2009>\u200950'}) "
+            f"(Total N\u2009=\u2009{total_n}, "
+            f"{'Total N\u2009<\u200950' if total_n < 50 else 'Total N\u2009\u2265\u200950'}) "
             f"\u2192 p\u2009{'>\u2009.05' if use_p else '\u2264\u2009.05'} "
             f"\u2192 <b>{'Parametric' if use_p else 'Non-parametric'} analysis applied</b>")
 
@@ -1816,8 +1830,9 @@ def main():
 
     # ── Decision banner ────────────────────────────────────────────────────────
     use_p    = R["use_param"]
-    prim_n   = R["normality"][0]["n"]
+    prim_n   = R["normality"][0]["n"]          # per-group/variable n (for display in tables)
     prim_lbl = R["normality"][0]["primary_label"]
+    total_n  = R.get("total_n", prim_n)        # total N for methodology decision
     test_name_used = (
         {"One-Sample T-Test":        "One-Sample T-Test",
          "Paired-Sample T-Test":     "Paired Samples T-Test",
@@ -1832,8 +1847,8 @@ def main():
         f'<div class="decision-banner {cls}">'
         f'{"&#10003;" if use_p else "&#9888;&#65039;"} '
         f'Primary normality criterion: <b>{prim_lbl}</b> '
-        f'(n\u2009=\u2009{prim_n}, '
-        f'{"n\u2009\u2264\u200950" if prim_n <= 50 else "n\u2009>\u200950"}) '
+        f'(Total N\u2009=\u2009{total_n}, '
+        f'{"Total N\u2009<\u200950" if total_n < 50 else "Total N\u2009\u2265\u200950"}) '
         f'\u2192 p\u2009{">" if use_p else "\u2264"}\u2009.05 '
         f'\u2192 <b>{test_name_used}</b> applied'
         f'</div>', unsafe_allow_html=True)
@@ -1895,16 +1910,12 @@ def main():
     # ── Tab: Normality ─────────────────────────────────────────────────────────
     _t0 = ti; ti += 1
     with tabs[_t0]:
-        # Recommendation note — per group for independent, single for others
-        if test_type == "Independent-Sample T-Test":
-            rec_parts = []
-            for nm in R["normality"]:
-                rec_parts.append(normality_recommendation_note(nm["n"])
-                                 .replace("<b>Normality Test Recommendation",
-                                          f"<b>Normality Test Recommendation — {nm['label']}"))
-            rec_note = "<br/>".join(rec_parts)
-        else:
-            rec_note = normality_recommendation_note(prim_n)
+        # total_n: for Independent = n1+n2, for others = n of variable
+        total_n_analysis = R.get("total_n", R["normality"][0]["n"])
+        prim_lbl_display = R["normality"][0]["primary_label"]
+
+        # Recommendation note — single note based on total N
+        rec_note = normality_recommendation_note(total_n_analysis)
         st.markdown(f'<div class="norm-rec-box">{rec_note}</div>',
                     unsafe_allow_html=True)
 
@@ -1919,27 +1930,19 @@ def main():
                                _f(n_item["sw_W"]), _p(n_item["sw_p"]), res])
         st.markdown(html_tbl(sw_rows_ui, left_cols={0,4}), unsafe_allow_html=True)
 
-        recommended_sw = (prim_lbl == "Shapiro-Wilk")
-        if recommended_sw:
-            n_desc = (f"n\u2009=\u2009{prim_n}"
-                      if test_type != "Independent-Sample T-Test"
-                      else " and ".join(f"n\u2009=\u2009{nm['n']} ({nm['label']})"
-                                        for nm in R["normality"]))
+        if prim_lbl_display == "Shapiro-Wilk":
             st.markdown(
                 f'<p class="note-txt">&#9733; '
                 f'Shapiro-Wilk is the recommended primary criterion '
-                f'for these sample sizes ({n_desc}, each \u2264\u200950). '
+                f'(Total N\u2009=\u2009{total_n_analysis}\u2009&lt;\u200950). '
                 f'Decision is based on this result.</p>',
                 unsafe_allow_html=True)
         else:
-            n_desc = (f"n\u2009=\u2009{prim_n}"
-                      if test_type != "Independent-Sample T-Test"
-                      else " and ".join(f"n\u2009=\u2009{nm['n']} ({nm['label']})"
-                                        for nm in R["normality"]))
             st.markdown(
-                f'<p class="note-txt">Reported for informational purposes. '
-                f'Kolmogorov-Smirnov is the recommended criterion '
-                f'for these sample sizes ({n_desc}, each >\u200950).</p>',
+                f'<p class="note-txt">'
+                f'Reported for informational purposes '
+                f'(Total N\u2009=\u2009{total_n_analysis}\u2009\u2265\u200950; '
+                f'Kolmogorov-Smirnov is the recommended criterion).</p>',
                 unsafe_allow_html=True)
 
         st.markdown(
@@ -1955,43 +1958,35 @@ def main():
                                _f(n_item["ks_D"]), _p(n_item["ks_p"]), res])
         st.markdown(html_tbl(ks_rows_ui, left_cols={0,4}), unsafe_allow_html=True)
 
-        recommended_ks = (prim_lbl == "Kolmogorov-Smirnov")
-        if recommended_ks:
-            n_desc_ks = (f"n\u2009=\u2009{prim_n}"
-                         if test_type != "Independent-Sample T-Test"
-                         else " and ".join(f"n\u2009=\u2009{nm['n']} ({nm['label']})"
-                                           for nm in R["normality"]))
+        if prim_lbl_display == "Kolmogorov-Smirnov":
             st.markdown(
                 f'<p class="note-txt">&#9733; '
                 f'Kolmogorov-Smirnov (Lilliefors correction) is the recommended '
-                f'primary criterion for these sample sizes ({n_desc_ks}, each >\u200950). '
+                f'primary criterion '
+                f'(Total N\u2009=\u2009{total_n_analysis}\u2009\u2265\u200950). '
                 f'Decision is based on this result.</p>',
                 unsafe_allow_html=True)
         else:
-            n_desc_ks = (f"n\u2009=\u2009{prim_n}"
-                         if test_type != "Independent-Sample T-Test"
-                         else " and ".join(f"n\u2009=\u2009{nm['n']} ({nm['label']})"
-                                           for nm in R["normality"]))
             st.markdown(
                 f'<p class="note-txt">\u1d43 Lilliefors significance correction applied. '
-                f'Reported for informational purposes. '
-                f'Shapiro-Wilk is the recommended criterion '
-                f'for these sample sizes ({n_desc_ks}, each \u2264\u200950).</p>',
+                f'Reported for informational purposes '
+                f'(Total N\u2009=\u2009{total_n_analysis}\u2009&lt;\u200950; '
+                f'Shapiro-Wilk is the recommended criterion).</p>',
                 unsafe_allow_html=True)
 
         if use_p:
             st.markdown(
                 f'<div class="info-box">&#10003; '
-                f'<b>{prim_lbl}</b> (recommended criterion, '
-                f'n\u2009=\u2009{prim_n}) p\u2009&gt;\u2009.05 '
+                f'<b>{prim_lbl_display}</b> (recommended criterion, '
+                f'Total N\u2009=\u2009{total_n_analysis}) p\u2009&gt;\u2009.05 '
                 f'\u2192 Normality assumption satisfied '
                 f'\u2192 <b>Parametric analysis applied.</b></div>',
                 unsafe_allow_html=True)
         else:
             st.markdown(
                 f'<div class="warn-box">&#9888; '
-                f'<b>{prim_lbl}</b> (recommended criterion, '
-                f'n\u2009=\u2009{prim_n}) p\u2009\u2264\u2009.05 '
+                f'<b>{prim_lbl_display}</b> (recommended criterion, '
+                f'Total N\u2009=\u2009{total_n_analysis}) p\u2009\u2264\u2009.05 '
                 f'\u2192 Normality assumption violated '
                 f'\u2192 <b>Non-parametric analysis applied.</b></div>',
                 unsafe_allow_html=True)
