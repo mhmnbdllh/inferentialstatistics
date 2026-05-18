@@ -1070,7 +1070,15 @@ def build_html_report(test_type, R, meta, interps, fig_bytes_list):
                         _f(nm["ks_D"]), _p(nm["ks_p"]),
                         "\u2713 Normal" if nm["ks_pass"] else "\u2717 Non-Normal"])
 
-    norm_rec = normality_recommendation_plain(prim_n)
+    # Also build per-group recommendation for HTML
+    if test_type == "Independent-Sample T-Test":
+        norm_rec_parts = []
+        for nm in R["normality"]:
+            note = normality_recommendation_plain(nm["n"])
+            norm_rec_parts.append(f"{nm['label']}: {note}")
+        norm_rec = " | ".join(norm_rec_parts)
+    else:
+        norm_rec = normality_recommendation_plain(prim_n)
 
     # ── descriptives ───────────────────────────────────────────────────────────
     dd = R["desc"].copy()
@@ -1539,7 +1547,7 @@ body{font-family:'DM Sans',sans-serif;background:#f0f4f8;color:#1e293b;font-size
   For n\u2009&gt;\u200950: asymptotic approximation.</p>
   {rec(norm_rec)}
   {sub("Assumption Summary")}
-  {rtbl(assume_rows_html, left_cols={{0,1,3}})}
+  {rtbl(assume_rows_html, left_cols={0,1,3})}
   <p class="tbl-note">Independence of observations cannot be formally tested
   and must be ensured through appropriate research design.</p>
 </div>
@@ -1887,8 +1895,16 @@ def main():
     # ── Tab: Normality ─────────────────────────────────────────────────────────
     _t0 = ti; ti += 1
     with tabs[_t0]:
-        # Recommendation note
-        rec_note = normality_recommendation_note(prim_n)
+        # Recommendation note — per group for independent, single for others
+        if test_type == "Independent-Sample T-Test":
+            rec_parts = []
+            for nm in R["normality"]:
+                rec_parts.append(normality_recommendation_note(nm["n"])
+                                 .replace("<b>Normality Test Recommendation",
+                                          f"<b>Normality Test Recommendation — {nm['label']}"))
+            rec_note = "<br/>".join(rec_parts)
+        else:
+            rec_note = normality_recommendation_note(prim_n)
         st.markdown(f'<div class="norm-rec-box">{rec_note}</div>',
                     unsafe_allow_html=True)
 
@@ -1905,17 +1921,25 @@ def main():
 
         recommended_sw = (prim_lbl == "Shapiro-Wilk")
         if recommended_sw:
+            n_desc = (f"n\u2009=\u2009{prim_n}"
+                      if test_type != "Independent-Sample T-Test"
+                      else " and ".join(f"n\u2009=\u2009{nm['n']} ({nm['label']})"
+                                        for nm in R["normality"]))
             st.markdown(
-                '<p class="note-txt">&#9733; '
-                'Shapiro-Wilk is the recommended primary criterion '
-                'for this sample size (n\u2009\u2264\u200950). '
-                'Decision is based on this result.</p>',
+                f'<p class="note-txt">&#9733; '
+                f'Shapiro-Wilk is the recommended primary criterion '
+                f'for these sample sizes ({n_desc}, each \u2264\u200950). '
+                f'Decision is based on this result.</p>',
                 unsafe_allow_html=True)
         else:
+            n_desc = (f"n\u2009=\u2009{prim_n}"
+                      if test_type != "Independent-Sample T-Test"
+                      else " and ".join(f"n\u2009=\u2009{nm['n']} ({nm['label']})"
+                                        for nm in R["normality"]))
             st.markdown(
-                '<p class="note-txt">Reported for informational purposes. '
-                'Kolmogorov-Smirnov is the recommended criterion '
-                'for this sample size (n\u2009>\u200950).</p>',
+                f'<p class="note-txt">Reported for informational purposes. '
+                f'Kolmogorov-Smirnov is the recommended criterion '
+                f'for these sample sizes ({n_desc}, each >\u200950).</p>',
                 unsafe_allow_html=True)
 
         st.markdown(
@@ -1933,18 +1957,26 @@ def main():
 
         recommended_ks = (prim_lbl == "Kolmogorov-Smirnov")
         if recommended_ks:
+            n_desc_ks = (f"n\u2009=\u2009{prim_n}"
+                         if test_type != "Independent-Sample T-Test"
+                         else " and ".join(f"n\u2009=\u2009{nm['n']} ({nm['label']})"
+                                           for nm in R["normality"]))
             st.markdown(
-                '<p class="note-txt">&#9733; '
-                'Kolmogorov-Smirnov (Lilliefors correction) is the recommended '
-                'primary criterion for this sample size (n\u2009>\u200950). '
-                'Decision is based on this result.</p>',
+                f'<p class="note-txt">&#9733; '
+                f'Kolmogorov-Smirnov (Lilliefors correction) is the recommended '
+                f'primary criterion for these sample sizes ({n_desc_ks}, each >\u200950). '
+                f'Decision is based on this result.</p>',
                 unsafe_allow_html=True)
         else:
+            n_desc_ks = (f"n\u2009=\u2009{prim_n}"
+                         if test_type != "Independent-Sample T-Test"
+                         else " and ".join(f"n\u2009=\u2009{nm['n']} ({nm['label']})"
+                                           for nm in R["normality"]))
             st.markdown(
-                '<p class="note-txt">\u1d43 Lilliefors significance correction applied. '
-                'Reported for informational purposes. '
-                'Shapiro-Wilk is the recommended criterion '
-                'for this sample size (n\u2009\u2264\u200950).</p>',
+                f'<p class="note-txt">\u1d43 Lilliefors significance correction applied. '
+                f'Reported for informational purposes. '
+                f'Shapiro-Wilk is the recommended criterion '
+                f'for these sample sizes ({n_desc_ks}, each \u2264\u200950).</p>',
                 unsafe_allow_html=True)
 
         if use_p:
