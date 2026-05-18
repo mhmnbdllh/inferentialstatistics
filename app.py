@@ -303,7 +303,7 @@ def test_normality(data, label=""):
         # Use 'table' for n<=50 (matches SPSS Lilliefors table interpolation)
         # Use 'approx' for n>50  (asymptotic approximation, accurate for large n)
         ks_method = 'table' if n <= 50 else 'approx'
-        ks_D, ks_p = lilliefors(data, dist='norm', pvalmethod='approx')
+        ks_D, ks_p = lilliefors(data, dist='norm', pvalmethod=ks_method)
         result["ks_D"]    = float(ks_D)
         result["ks_p"]    = float(ks_p)
         result["ks_pass"] = float(ks_p) >= 0.05
