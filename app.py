@@ -1336,13 +1336,6 @@ def build_html_report(test_type, R, meta, interps, fig_bytes_list):
             else "Welch correction applied"
         ])
     assume_rows_html.append([
-        "Independence",
-        "Research design",
-        "\u2014", "\u2014",
-        "\u2139 Assumed",
-        "Must be ensured by design"
-    ])
-    assume_rows_html.append([
         "Overall Decision",
         f"Primary: {prim_lbl} (Total N\u2009=\u2009{total_n})",
         "\u2014", "\u2014",
@@ -1558,6 +1551,16 @@ body{font-family:'DM Sans',sans-serif;background:#f0f4f8;color:#1e293b;font-size
     <span class="badge">Parametric &amp; Non-Parametric</span>
   </div>
   {meta_html}
+  <div style="margin-top:18px;padding-top:16px;border-top:1px solid rgba(255,255,255,.12);
+              display:flex;align-items:center;gap:16px;">
+    <div>
+      <p style="color:#94a3b8;font-size:.76rem;margin:0 0 8px;">
+        &#9749; Support this work &mdash; scan QRIS</p>
+      <img src="https://muhaiminabdullah.com/media/thumbnails/QRIS-muhaiminabdullahdotcom-340x480.jpeg"
+           alt="QRIS Support"
+           style="width:130px;border-radius:8px;border:2px solid #e94560;display:block;"/>
+    </div>
+  </div>
 </div>
 
 <div class="section">
@@ -1575,16 +1578,14 @@ body{font-family:'DM Sans',sans-serif;background:#f0f4f8;color:#1e293b;font-size
   For n\u2009\u2264\u200950: p-value from Lilliefors table (SPSS-equivalent).
   For n\u2009&gt;\u200950: asymptotic approximation.</p>
   <div class="warn-box" style="margin:10px 0;font-size:.79rem;">
-  <b>Note on KS p-value:</b> The p-value on Kolmogorov-Smirnov is computed using the Lilliefors significance correction
-  (statsmodels). Minor discrepancies with SPSS p-values may occur due to
-  differences in table interpolation implementations between software packages.
+  Minor discrepancies in Kolmogorov&ndash;Smirnov p-values may occur due to
+  differences in interpolation and approximation algorithms across statistical
+  software packages.
   </div>
   {rec(norm_rec)}
   {sub("Assumption Summary")}
   {rtbl(assume_rows_html, left_cols={0,1,2,5})}
   <p class="tbl-note">&#9605; Primary criterion for normality decision.
-  Independence of observations cannot be formally tested and must be ensured
-  through appropriate research design.
   References: Razali &amp; Wah (2011); Field (2018).</p>
 </div>
 
@@ -2016,10 +2017,9 @@ def main():
         # ── KS Disclaimer ─────────────────────────────────────────────────────
         st.markdown(
             '<div class="info-box" style="margin-top:.6rem;">'
-            '<b>Note on KS p-value:</b> The p-value on Kolmogorov-Smirnov is computed using the Lilliefors '
-            'significance correction (statsmodels). Minor discrepancies with '
-            'SPSS p-values may occur due to differences in table interpolation '
-            'implementations between software packages.'
+            'Minor discrepancies in Kolmogorov\u2013Smirnov p-values may occur '
+            'due to differences in interpolation and approximation algorithms '
+            'across statistical software packages.'
             '</div>',
             unsafe_allow_html=True)
 
@@ -2070,14 +2070,6 @@ def main():
             ])
 
         assume_rows.append([
-            "Independence",
-            "Research design",
-            "\u2014",
-            "\u2014",
-            '<span style="color:#64748b;">&#8505; Assumed</span>',
-            "Must be ensured by design"
-        ])
-        assume_rows.append([
             "<b>Overall Decision</b>",
             f"Primary: {prim_lbl_display}",
             f"Total N\u2009=\u2009{total_n_analysis}",
@@ -2091,8 +2083,6 @@ def main():
         st.markdown(
             '<p class="note-txt">'
             '&#9733; Primary criterion for normality decision. '
-            'Independence of observations cannot be formally tested and must '
-            'be ensured through appropriate research design. '
             'References: Razali &amp; Wah (2011); Field (2018).'
             '</p>', unsafe_allow_html=True)
 
@@ -2606,7 +2596,7 @@ def main():
                     "KS Result":             "Normal" if n_item["ks_pass"] else "Non-Normal",
                     "Primary Criterion":     n_item["primary_label"],
                     "Normality Decision":    "Normal" if n_item["pass"] else "Non-Normal",
-                    "KS Note":               "Minor p-value on Kolmogorov-Smirnov discrepancy may occur due to differing interpolation implementations.",
+                    "KS Note":               "D statistic identical to SPSS. Minor p-value discrepancy may occur due to differing interpolation implementations.",
                     "Recommendation":        normality_recommendation_plain(total_n_xls)
                 })
             pd.DataFrame(norm_rows_xls).to_excel(
@@ -2644,14 +2634,6 @@ def main():
                     "Role":         "Required for t-test",
                     "Decision":     "Equal variances assumed" if lv_xls["equal_var"] else "Welch correction applied"
                 })
-            assume_xls.append({
-                "Assumption":   "Independence of Observations",
-                "Test":         "Research design",
-                "Statistic":    "N/A", "Sig.": "N/A",
-                "Result":       "Assumed",
-                "Role":         "Prerequisite",
-                "Decision":     "Must be ensured by design"
-            })
             pd.DataFrame(assume_xls).to_excel(
                 writer, sheet_name="Assumption Summary", index=False)
 
