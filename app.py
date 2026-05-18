@@ -607,7 +607,18 @@ def run_one_sample(data, mu0, alpha=0.05):
     }
 
     w_res = wilcoxon_spss(data - mu0)
-    R["nonparametric"] = {**w_res, "test": "Wilcoxon Signed-Rank Test", "mu0": mu0}
+    diff_arr = data - mu0
+    r_rb  = rank_biserial_wilcoxon(diff_arr)
+    ci_lo, ci_hi = bootstrap_ci_effect_size(
+        rank_biserial_wilcoxon, [diff_arr], alpha=alpha)
+    R["nonparametric"] = {
+        **w_res,
+        "test": "Wilcoxon Signed-Rank Test", "mu0": mu0,
+        "rank_biserial_r": float(r_rb) if not np.isnan(r_rb) else np.nan,
+        "rb_ci_lower":     float(ci_lo) if not np.isnan(ci_lo) else np.nan,
+        "rb_ci_upper":     float(ci_hi) if not np.isnan(ci_hi) else np.nan,
+        "rb_label":        effect_label_r_nonparam(r_rb) if not np.isnan(r_rb) else "N/A"
+    }
     return R
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -667,8 +678,18 @@ def run_paired(data1, data2, label1="Var1", label2="Var2", alpha=0.05):
     }
 
     w_res = wilcoxon_spss(diff)
-    R["nonparametric"] = {**w_res, "test": "Wilcoxon Signed-Rank Test",
-                          "label1": label1, "label2": label2}
+    r_rb  = rank_biserial_wilcoxon(diff)
+    ci_lo, ci_hi = bootstrap_ci_effect_size(
+        rank_biserial_wilcoxon, [diff], alpha=alpha)
+    R["nonparametric"] = {
+        **w_res,
+        "test": "Wilcoxon Signed-Rank Test",
+        "label1": label1, "label2": label2,
+        "rank_biserial_r": float(r_rb) if not np.isnan(r_rb) else np.nan,
+        "rb_ci_lower":     float(ci_lo) if not np.isnan(ci_lo) else np.nan,
+        "rb_ci_upper":     float(ci_hi) if not np.isnan(ci_hi) else np.nan,
+        "rb_label":        effect_label_r_nonparam(r_rb) if not np.isnan(r_rb) else "N/A"
+    }
     return R
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -750,8 +771,18 @@ def run_independent(g1, g2, label1="Group 1", label2="Group 2",
         "cohens_d": d
     }
 
-    mw = mannwhitney_spss(g1, g2, label1, label2)
-    R["nonparametric"] = {**mw, "test": "Mann-Whitney U Test", "dep_var": dep_var}
+    mw   = mannwhitney_spss(g1, g2, label1, label2)
+    r_rb = rank_biserial_mannwhitney(g1, g2)
+    ci_lo, ci_hi = bootstrap_ci_effect_size(
+        rank_biserial_mannwhitney, [g1, g2], alpha=alpha)
+    R["nonparametric"] = {
+        **mw,
+        "test": "Mann-Whitney U Test", "dep_var": dep_var,
+        "rank_biserial_r": float(r_rb) if not np.isnan(r_rb) else np.nan,
+        "rb_ci_lower":     float(ci_lo) if not np.isnan(ci_lo) else np.nan,
+        "rb_ci_upper":     float(ci_hi) if not np.isnan(ci_hi) else np.nan,
+        "rb_label":        effect_label_r_nonparam(r_rb) if not np.isnan(r_rb) else "N/A"
+    }
     return R
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1345,36 +1376,34 @@ def build_html_report(test_type, R, meta, interps, fig_bytes_list):
 
     # ── non-parametric effect size for HTML ────────────────────────────────────
     try:
-        cfg_s = meta  # use meta dict to get labels
+        r_rb_h   = np_r.get("rank_biserial_r", np.nan)
+        ci_lo_h  = np_r.get("rb_ci_lower", np.nan)
+        ci_hi_h  = np_r.get("rb_ci_upper", np.nan)
+        r_lab_h  = np_r.get("rb_label", "N/A")
         if test_type == "Independent-Sample T-Test":
-            r_rb  = 1 - (2 * np_r["U1"]) / (np_r["n1"] * np_r["n2"])
-            ci_lo_es = ci_hi_es = np.nan  # bootstrap needs raw data, skip in HTML
-            es_label = "Mann-Whitney U"
-            pair_desc_es = f"{np_r['label1']} vs. {np_r['label2']}"
+            es_label_h   = "Mann-Whitney U"
+            pair_desc_h  = f"{np_r['label1']} vs. {np_r['label2']}"
+        elif test_type == "Paired-Sample T-Test":
+            es_label_h   = "Wilcoxon Signed-Rank"
+            pair_desc_h  = f"{pr['label1']} \u2212 {pr['label2']}"
         else:
-            n_nz = np_r.get("n_pos",0) + np_r.get("n_neg",0)
-            pos_rs = np_r.get("pos_rank_sum", 0)
-            neg_rs = np_r.get("neg_rank_sum", 0)
-            total_rs = pos_rs + neg_rs
-            r_rb = (pos_rs - neg_rs) / total_rs if total_rs > 0 else np.nan
-            ci_lo_es = ci_hi_es = np.nan
-            es_label = "Wilcoxon Signed-Rank"
-            if test_type == "Paired-Sample T-Test":
-                pair_desc_es = f"{pr['label1']} \u2212 {pr['label2']}"
-            else:
-                pair_desc_es = f"Variable \u2212 \u03bc\u2080"
-        r_lab_es = effect_label_r_nonparam(r_rb) if not np.isnan(r_rb) else "N/A"
+            es_label_h   = "Wilcoxon Signed-Rank"
+            pair_desc_h  = f"Variable \u2212 \u03bc\u2080"
+        ci_str_h = (f"[{_f(ci_lo_h)}, {_f(ci_hi_h)}]"
+                    if not (np.isnan(ci_lo_h) or np.isnan(ci_hi_h)) else ".")
         np_es_html = rtbl([
-            ["Test","Comparison","Rank-Biserial r","Effect Size","Interpretation"],
-            [es_label, pair_desc_es,
-             _f(r_rb) if not np.isnan(r_rb) else ".",
-             r_lab_es,
+            ["Test","Comparison","Rank-Biserial r",
+             "95% Bootstrap CI","Effect Size","Interpretation"],
+            [es_label_h, pair_desc_h,
+             _f(r_rb_h) if not np.isnan(r_rb_h) else ".",
+             ci_str_h, r_lab_h,
              "|r|\u2009<\u2009.10 negligible, .10\u2013.29 small, "
              ".30\u2013.49 medium, \u2265\u2009.50 large"]
-        ], left_cols={0,1,4})
+        ], left_cols={0,1,5})
         np_es_html += ('<p class="tbl-note">Rank-biserial correlation r is a '
                        'non-parametric effect size not reported by SPSS by default. '
-                       'Reference: Kerby (2014).</p>')
+                       'Bootstrap 95% CI based on 2,000 resamples '
+                       '(Efron &amp; Tibshirani, 1993; Kerby, 2014).</p>')
     except Exception:
         np_es_html = '<p class="tbl-note">Effect size not available.</p>'
 
@@ -2330,50 +2359,30 @@ def main():
             'Rank-Biserial Correlation (r)'
             '</div>', unsafe_allow_html=True)
 
-        if test_type == "Independent-Sample T-Test":
-            g1d_es = (st.session_state["stats_df"]
-                      [st.session_state["stats_df"][st.session_state["stats_cfg"]["grp_col"]]
-                       == st.session_state["stats_cfg"]["g1"]]
-                      [st.session_state["stats_cfg"]["dep_col"]].dropna().values)
-            g2d_es = (st.session_state["stats_df"]
-                      [st.session_state["stats_df"][st.session_state["stats_cfg"]["grp_col"]]
-                       == st.session_state["stats_cfg"]["g2"]]
-                      [st.session_state["stats_cfg"]["dep_col"]].dropna().values)
-            r_rb = rank_biserial_mannwhitney(g1d_es, g2d_es)
-            ci_lo, ci_hi = bootstrap_ci_effect_size(
-                rank_biserial_mannwhitney, [g1d_es, g2d_es], alpha=alpha)
-            es_label = "Mann-Whitney U"
-            pair_desc = f"{np_r['label1']} vs. {np_r['label2']}"
-        else:
-            cfg_s = st.session_state["stats_cfg"]
-            if test_type == "One-Sample T-Test":
-                raw_diff = (st.session_state["stats_df"][cfg_s["test_var"]]
-                            .dropna().values - cfg_s["mu0"])
-            else:
-                pdata = st.session_state["stats_df"][
-                    [cfg_s["v1"], cfg_s["v2"]]].dropna()
-                raw_diff = (pdata[cfg_s["v1"]].values
-                            - pdata[cfg_s["v2"]].values)
-            r_rb = rank_biserial_wilcoxon(raw_diff)
-            ci_lo, ci_hi = bootstrap_ci_effect_size(
-                rank_biserial_wilcoxon, [raw_diff], alpha=alpha)
-            es_label = "Wilcoxon Signed-Rank"
-            pair_desc = (f"{cfg_s.get('v1','Variable')} \u2212 "
-                         f"{cfg_s.get('v2','\u03bc\u2080')}"
-                         if test_type == "Paired-Sample T-Test"
-                         else f"{cfg_s.get('test_var','Variable')} \u2212 \u03bc\u2080")
+        r_rb   = np_r.get("rank_biserial_r", np.nan)
+        ci_lo  = np_r.get("rb_ci_lower", np.nan)
+        ci_hi  = np_r.get("rb_ci_upper", np.nan)
+        r_lab  = np_r.get("rb_label", "N/A")
 
-        r_lab = effect_label_r_nonparam(r_rb) if not np.isnan(r_rb) else "N/A"
+        if test_type == "Independent-Sample T-Test":
+            es_label  = "Mann-Whitney U"
+            pair_desc = f"{np_r['label1']} vs. {np_r['label2']}"
+        elif test_type == "Paired-Sample T-Test":
+            es_label  = "Wilcoxon Signed-Rank"
+            pair_desc = f"{pr['label1']} \u2212 {pr['label2']}"
+        else:
+            es_label  = "Wilcoxon Signed-Rank"
+            pair_desc = f"{meta.get('Variable','Variable')} \u2212 \u03bc\u2080"
+
         st.markdown(html_tbl([
             ["Test","Comparison","Rank-Biserial r",
-             f"95% Bootstrap CI",
-             "Effect Size","Interpretation"],
+             "95% Bootstrap CI","Effect Size","Interpretation"],
             [es_label, pair_desc,
              _f(r_rb) if not np.isnan(r_rb) else ".",
              (f"[{_f(ci_lo)}, {_f(ci_hi)}]"
-              if not np.isnan(ci_lo) else "."),
+              if not (np.isnan(ci_lo) or np.isnan(ci_hi)) else "."),
              r_lab,
-             "Rank-biserial r \u2208 [\u22121, 1]; "
+             "Rank-biserial r \u2208 [\u22121,\u20091]; "
              "|r|\u2009<\u2009.10 negligible, "
              ".10\u2013.29 small, "
              ".30\u2013.49 medium, "
@@ -2382,9 +2391,8 @@ def main():
         st.markdown(
             '<p class="note-txt">'
             'Rank-biserial correlation r is a non-parametric effect size not '
-            'reported by SPSS. Bootstrap 95% CI based on 2,000 resamples '
-            '(Efron &amp; Tibshirani, 1993; Kerby, 2014). '
-            'This measure complements Cohen\u2019s d for non-parametric analyses.'
+            'reported by SPSS by default. Bootstrap 95% CI based on 2,000 '
+            'resamples (Efron &amp; Tibshirani, 1993; Kerby, 2014).'
             '</p>', unsafe_allow_html=True)
 
     # ── Tab: Plots ─────────────────────────────────────────────────────────────
@@ -2659,27 +2667,24 @@ def main():
 
             # Sheet 8: Effect Size
             try:
-                cfg_s_xls = st.session_state.get("stats_cfg", {})
-                df_xls    = st.session_state.get("stats_df", pd.DataFrame())
+                r_xls   = R["nonparametric"].get("rank_biserial_r", np.nan)
+                ci_l_xls = R["nonparametric"].get("rb_ci_lower", np.nan)
+                ci_u_xls = R["nonparametric"].get("rb_ci_upper", np.nan)
+                r_lbl_xls = R["nonparametric"].get("rb_label", "N/A")
                 es_rows_xls = []
-                np_r_xls = R["nonparametric"]
-                if test_type == "Independent-Sample T-Test" and not df_xls.empty:
-                    g1_xls = df_xls[df_xls[cfg_s_xls["grp_col"]]==cfg_s_xls["g1"]][cfg_s_xls["dep_col"]].dropna().values
-                    g2_xls = df_xls[df_xls[cfg_s_xls["grp_col"]]==cfg_s_xls["g2"]][cfg_s_xls["dep_col"]].dropna().values
-                    r_xls  = rank_biserial_mannwhitney(g1_xls, g2_xls)
-                else:
-                    r_xls = np.nan
                 es_rows_xls.append({
-                    "Effect Size":   "Cohen's d (parametric)",
-                    "Value":         round(R["parametric"].get("cohens_d", float("nan")), 3),
+                    "Effect Size":    "Cohen's d (parametric)",
+                    "Value":          round(R["parametric"].get("cohens_d", float("nan")), 3),
                     "Interpretation": effect_label_d(R["parametric"].get("cohens_d", 0)),
-                    "Reference":     "Cohen (1988)"
+                    "Reference":      "Cohen (1988)"
                 })
                 es_rows_xls.append({
-                    "Effect Size":   "Rank-Biserial r (non-parametric)",
-                    "Value":         round(r_xls, 3) if not np.isnan(r_xls) else "N/A",
-                    "Interpretation": effect_label_r_nonparam(r_xls) if not np.isnan(r_xls) else "N/A",
-                    "Reference":     "Kerby (2014)"
+                    "Effect Size":    "Rank-Biserial r (non-parametric)",
+                    "Value":          round(r_xls, 3) if not np.isnan(r_xls) else "N/A",
+                    "95% Bootstrap CI Lower": round(ci_l_xls, 3) if not np.isnan(ci_l_xls) else "N/A",
+                    "95% Bootstrap CI Upper": round(ci_u_xls, 3) if not np.isnan(ci_u_xls) else "N/A",
+                    "Interpretation": r_lbl_xls,
+                    "Reference":      "Kerby (2014); Efron & Tibshirani (1993)"
                 })
                 pd.DataFrame(es_rows_xls).to_excel(
                     writer, sheet_name="Effect Size", index=False)
