@@ -384,6 +384,165 @@ def mannwhitney_spss(g1, g2, label1, label2):
                 label1=label1, label2=label2)
 
 # ══════════════════════════════════════════════════════════════════════════════
+# EFFECT SIZE — NON-PARAMETRIC (beyond SPSS)
+# ══════════════════════════════════════════════════════════════════════════════
+def rank_biserial_mannwhitney(g1, g2):
+    """
+    Rank-biserial correlation r for Mann-Whitney U.
+    Formula: r = 1 - (2U) / (n1 * n2)
+    Interpretation: |r| < .1 negligible, .1-.3 small, .3-.5 medium, > .5 large
+    Reference: King & Minium (2008); Kerby (2014).
+    """
+    g1 = np.array(g1, dtype=float)
+    g2 = np.array(g2, dtype=float)
+    n1, n2 = len(g1), len(g2)
+    U1 = sum(1 if x > y else 0.5 if x == y else 0
+             for x in g1 for y in g2)
+    r = 1 - (2 * U1) / (n1 * n2)
+    return float(r)
+
+
+def rank_biserial_wilcoxon(diff_arr):
+    """
+    Rank-biserial correlation r for Wilcoxon Signed-Rank.
+    Formula: r = (T+ - T-) / (T+ + T-)
+    Reference: Kerby (2014); King & Minium (2008).
+    """
+    diff_arr = np.array(diff_arr, dtype=float)
+    diff_nz  = diff_arr[diff_arr != 0]
+    if len(diff_nz) < 1:
+        return np.nan
+    abs_d  = np.abs(diff_nz)
+    ranks  = scipy_stats.rankdata(abs_d) if False else stats.rankdata(abs_d)
+    pos_rs = float(np.sum(ranks[diff_nz > 0]))
+    neg_rs = float(np.sum(ranks[diff_nz < 0]))
+    total  = pos_rs + neg_rs
+    return float((pos_rs - neg_rs) / total) if total > 0 else np.nan
+
+
+def bootstrap_ci_effect_size(effect_fn, data_args, n_boot=2000, alpha=0.05,
+                              seed=42):
+    """
+    Bootstrap 95% CI for any effect size function.
+    Returns (lower, upper) confidence interval.
+    Reference: Efron & Tibshirani (1993).
+    """
+    rng = np.random.default_rng(seed)
+    boot_effects = []
+    for _ in range(n_boot):
+        resampled = []
+        for arr in data_args:
+            arr = np.array(arr, dtype=float)
+            resampled.append(rng.choice(arr, size=len(arr), replace=True))
+        try:
+            e = effect_fn(*resampled)
+            if not np.isnan(e):
+                boot_effects.append(e)
+        except Exception:
+            pass
+    if len(boot_effects) < 10:
+        return np.nan, np.nan
+    lo = float(np.percentile(boot_effects, 100 * alpha / 2))
+    hi = float(np.percentile(boot_effects, 100 * (1 - alpha / 2)))
+    return lo, hi
+
+
+def effect_label_r_nonparam(r):
+    """Effect size label for rank-biserial correlation."""
+    a = abs(r)
+    if a < .10: return "negligible"
+    if a < .30: return "small"
+    if a < .50: return "medium"
+    return "large"
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# STATISTICAL POWER ANALYSIS (beyond SPSS)
+# ══════════════════════════════════════════════════════════════════════════════
+def compute_power(test_type, R, alpha):
+    """
+    Post-hoc statistical power analysis.
+    Uses observed effect size and sample size to estimate achieved power.
+    Reference: Cohen (1988). Statistical Power Analysis for the Behavioral Sciences.
+    """
+    from scipy.stats import t as t_dist, norm as norm_dist
+    pr   = R["parametric"]
+    np_r = R["nonparametric"]
+    use_p = R["use_param"]
+    result = {}
+
+    if use_p:
+        d    = abs(pr["cohens_d"])
+        if test_type == "One-Sample T-Test":
+            n  = R["desc"]["N"].iloc[0]
+            nc = d * np.sqrt(n)          # non-centrality parameter
+            df = n - 1
+            tc = t_dist.ppf(1 - alpha/2, df)
+            power = 1 - t_dist.cdf(tc, df, nc) + t_dist.cdf(-tc, df, nc)
+            result = {"n": int(n), "effect_size": d,
+                      "effect_type": "Cohen's d", "power": float(power)}
+
+        elif test_type == "Paired-Sample T-Test":
+            n  = R["desc"]["N"].iloc[0]
+            nc = d * np.sqrt(n)
+            df = n - 1
+            tc = t_dist.ppf(1 - alpha/2, df)
+            power = 1 - t_dist.cdf(tc, df, nc) + t_dist.cdf(-tc, df, nc)
+            result = {"n": int(n), "effect_size": d,
+                      "effect_type": "Cohen's d", "power": float(power)}
+
+        else:
+            n1 = np_r["n1"]; n2 = np_r["n2"]
+            n_harm = 2 / (1/n1 + 1/n2)  # harmonic mean
+            nc = d * np.sqrt(n_harm / 2)
+            df = pr["df_eq"] if R["levene"]["equal_var"] else pr["df_welch"]
+            tc = t_dist.ppf(1 - alpha/2, df)
+            power = 1 - t_dist.cdf(tc, df, nc) + t_dist.cdf(-tc, df, nc)
+            result = {"n1": int(n1), "n2": int(n2),
+                      "effect_size": d,
+                      "effect_type": "Cohen's d", "power": float(power)}
+    else:
+        # Non-parametric: approximate power via normal approximation
+        if test_type == "Independent-Sample T-Test":
+            r    = abs(rank_biserial_mannwhitney(
+                R["desc"].iloc[0].get("Mean", 0),  # placeholder
+                R["desc"].iloc[1].get("Mean", 0)
+            ))
+            n1   = np_r["n1"]; n2 = np_r["n2"]
+            # Asymptotic relative efficiency of Mann-Whitney vs t ≈ 0.955
+            d_approx = 2 * abs(np_r.get("Z", 0)) / np.sqrt(n1 + n2)
+            n_harm   = 2 / (1/n1 + 1/n2)
+            nc       = d_approx * np.sqrt(n_harm / 2)
+            df       = n1 + n2 - 2
+            tc       = t_dist.ppf(1 - alpha/2, df)
+            power    = 1 - t_dist.cdf(tc, df, nc) + t_dist.cdf(-tc, df, nc)
+            result   = {"n1": int(n1), "n2": int(n2),
+                        "effect_size": float(d_approx),
+                        "effect_type": "Approx. d (from Z)",
+                        "power": float(power)}
+        else:
+            n    = np_r.get("n_total", np_r.get("n_pos",0) + np_r.get("n_neg",0))
+            z    = abs(np_r.get("Z", 0))
+            # Power ≈ P(|Z| > z_alpha/2 - z_observed)
+            z_crit = norm_dist.ppf(1 - alpha/2)
+            power  = norm_dist.sf(z_crit - z) + norm_dist.cdf(-z_crit - z)
+            d_approx = z / np.sqrt(n) if n > 0 else np.nan
+            result = {"n": int(n),
+                      "effect_size": float(d_approx),
+                      "effect_type": "Approx. d (from Z)",
+                      "power": float(max(0, min(1, power)))}
+
+    # Power interpretation
+    p = result.get("power", 0)
+    if p >= .95:   result["power_label"] = "Excellent (\u2265\u2009.95)"
+    elif p >= .80: result["power_label"] = "Adequate (\u2265\u2009.80)"
+    elif p >= .60: result["power_label"] = "Moderate (.60\u2013.79)"
+    else:          result["power_label"] = "Low (< .60) \u2014 consider increasing sample size"
+
+    return result
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # ONE-SAMPLE ANALYSIS
 # ══════════════════════════════════════════════════════════════════════════════
 def run_one_sample(data, mu0, alpha=0.05):
@@ -1663,6 +1822,54 @@ def main():
                 f'\u2192 <b>Non-parametric analysis applied.</b></div>',
                 unsafe_allow_html=True)
 
+        # ── Assumption Summary Table ───────────────────────────────────────────
+        st.markdown('<div class="sec-title">&#9989; Assumption Summary</div>',
+                    unsafe_allow_html=True)
+        assume_rows = [["Assumption","Test / Criterion","Result","Decision"]]
+        for nm in R["normality"]:
+            passed = nm["pass"]
+            sw_res = f"SW W\u2009=\u2009{_f(nm['sw_W'])}, p\u2009=\u2009{_p(nm['sw_p'])}"
+            ks_res = f"KS D\u2009=\u2009{_f(nm['ks_D'])}, p\u2009=\u2009{_p(nm['ks_p'])}"
+            assume_rows.append([
+                f"Normality \u2014 {nm['label']}",
+                f"{sw_res} | {ks_res} (primary: {nm['primary_label']})",
+                ('<span class="pass">&#10003; Satisfied</span>'
+                 if passed else '<span class="fail">&#10007; Violated</span>'),
+                "Parametric eligible" if passed else "Non-parametric required"
+            ])
+        if "levene" in R:
+            lev = R["levene"]
+            assume_rows.append([
+                "Homogeneity of Variance",
+                f"Levene F({lev['df1']},\u2009{lev['df2']})\u2009=\u2009{_f(lev['F'])}, "
+                f"p\u2009=\u2009{_p(lev['Sig.'])}",
+                ('<span class="pass">&#10003; Satisfied</span>'
+                 if lev["equal_var"] else '<span class="fail">&#10007; Violated</span>'),
+                "Equal variances assumed" if lev["equal_var"]
+                else "Welch correction applied"
+            ])
+        assume_rows.append([
+            "Independence of Observations",
+            "By research design (not statistically testable)",
+            '<span style="color:#64748b;">&#8505; Assumed</span>',
+            "Must be ensured by design"
+        ])
+        assume_rows.append([
+            "<b>Overall Decision</b>",
+            f"Primary criterion: {prim_lbl}",
+            f'<b>{"&#10003; Parametric" if use_p else "&#9888; Non-parametric"}</b>',
+            f'<b>{"T-Test family" if use_p else "Wilcoxon / Mann-Whitney U"}</b>'
+        ])
+        st.markdown(html_tbl(assume_rows, left_cols={0,1,3}),
+                    unsafe_allow_html=True)
+        st.markdown(
+            '<p class="note-txt">'
+            'The assumption summary provides a consolidated overview of all '
+            'statistical prerequisites evaluated prior to inferential testing. '
+            'Independence of observations cannot be formally tested and must '
+            'be ensured through appropriate research design.'
+            '</p>', unsafe_allow_html=True)
+
     # ── Tab: Descriptives ──────────────────────────────────────────────────────
     _t1 = ti; ti += 1
     with tabs[_t1]:
@@ -1898,6 +2105,70 @@ def main():
                 'The <b>Parametric</b> tab contains the recommended analysis.</div>',
                 unsafe_allow_html=True)
 
+        # ── Non-parametric Effect Size: Rank-Biserial r ────────────────────────
+        st.markdown(
+            '<div class="sec-title">'
+            '&#128200; Non-Parametric Effect Size &nbsp;&middot;&nbsp; '
+            'Rank-Biserial Correlation (r)'
+            '</div>', unsafe_allow_html=True)
+
+        if test_type == "Independent-Sample T-Test":
+            g1d_es = (st.session_state["stats_df"]
+                      [st.session_state["stats_df"][st.session_state["stats_cfg"]["grp_col"]]
+                       == st.session_state["stats_cfg"]["g1"]]
+                      [st.session_state["stats_cfg"]["dep_col"]].dropna().values)
+            g2d_es = (st.session_state["stats_df"]
+                      [st.session_state["stats_df"][st.session_state["stats_cfg"]["grp_col"]]
+                       == st.session_state["stats_cfg"]["g2"]]
+                      [st.session_state["stats_cfg"]["dep_col"]].dropna().values)
+            r_rb = rank_biserial_mannwhitney(g1d_es, g2d_es)
+            ci_lo, ci_hi = bootstrap_ci_effect_size(
+                rank_biserial_mannwhitney, [g1d_es, g2d_es], alpha=alpha)
+            es_label = "Mann-Whitney U"
+            pair_desc = f"{np_r['label1']} vs. {np_r['label2']}"
+        else:
+            cfg_s = st.session_state["stats_cfg"]
+            if test_type == "One-Sample T-Test":
+                raw_diff = (st.session_state["stats_df"][cfg_s["test_var"]]
+                            .dropna().values - cfg_s["mu0"])
+            else:
+                pdata = st.session_state["stats_df"][
+                    [cfg_s["v1"], cfg_s["v2"]]].dropna()
+                raw_diff = (pdata[cfg_s["v1"]].values
+                            - pdata[cfg_s["v2"]].values)
+            r_rb = rank_biserial_wilcoxon(raw_diff)
+            ci_lo, ci_hi = bootstrap_ci_effect_size(
+                rank_biserial_wilcoxon, [raw_diff], alpha=alpha)
+            es_label = "Wilcoxon Signed-Rank"
+            pair_desc = (f"{cfg_s.get('v1','Variable')} \u2212 "
+                         f"{cfg_s.get('v2','\u03bc\u2080')}"
+                         if test_type == "Paired-Sample T-Test"
+                         else f"{cfg_s.get('test_var','Variable')} \u2212 \u03bc\u2080")
+
+        r_lab = effect_label_r_nonparam(r_rb) if not np.isnan(r_rb) else "N/A"
+        st.markdown(html_tbl([
+            ["Test","Comparison","Rank-Biserial r",
+             f"95% Bootstrap CI",
+             "Effect Size","Interpretation"],
+            [es_label, pair_desc,
+             _f(r_rb) if not np.isnan(r_rb) else ".",
+             (f"[{_f(ci_lo)}, {_f(ci_hi)}]"
+              if not np.isnan(ci_lo) else "."),
+             r_lab,
+             "Rank-biserial r \u2208 [\u22121, 1]; "
+             "|r|\u2009<\u2009.10 negligible, "
+             ".10\u2013.29 small, "
+             ".30\u2013.49 medium, "
+             "\u2265\u2009.50 large"]
+        ], left_cols={0,1,5}), unsafe_allow_html=True)
+        st.markdown(
+            '<p class="note-txt">'
+            'Rank-biserial correlation r is a non-parametric effect size not '
+            'reported by SPSS. Bootstrap 95% CI based on 2,000 resamples '
+            '(Efron &amp; Tibshirani, 1993; Kerby, 2014). '
+            'This measure complements Cohen\u2019s d for non-parametric analyses.'
+            '</p>', unsafe_allow_html=True)
+
     # ── Tab: Plots ─────────────────────────────────────────────────────────────
     _tpl = ti; ti += 1
     with tabs[_tpl]:
@@ -1985,6 +2256,87 @@ def main():
                        f"p\u2009{'< .001' if np_r['p']<.001 else '= '+_p(np_r['p'])} "
                        f"(2-tailed, asymptotic).")
         st.code(apa, language=None)
+
+        # ── Statistical Power Assessment ───────────────────────────────────────
+        st.markdown("---")
+        st.markdown(
+            "### &#9889; Statistical Power Assessment")
+        try:
+            pw = compute_power(test_type, R, alpha)
+            power_val = pw.get("power", np.nan)
+            power_pct = f"{power_val*100:.1f}%" if not np.isnan(power_val) else "N/A"
+            power_lbl = pw.get("power_label", "N/A")
+            effect_v  = pw.get("effect_size", np.nan)
+            effect_t  = pw.get("effect_type", "—")
+
+            # Colour-code power bar
+            if not np.isnan(power_val):
+                bar_color = ("#16a34a" if power_val >= .80
+                             else "#f59e0b" if power_val >= .60
+                             else "#dc2626")
+                bar_pct = int(power_val * 100)
+                bar_html = (
+                    f'<div style="background:#e2e8f0;border-radius:8px;'
+                    f'height:18px;width:100%;margin:8px 0;">'
+                    f'<div style="background:{bar_color};width:{bar_pct}%;'
+                    f'height:18px;border-radius:8px;transition:width .4s;"></div>'
+                    f'</div>'
+                )
+            else:
+                bar_html = ""
+
+            if "n1" in pw:
+                n_desc = (f"n\u2081\u2009=\u2009{pw['n1']}, "
+                          f"n\u2082\u2009=\u2009{pw['n2']}")
+            else:
+                n_desc = f"n\u2009=\u2009{pw.get('n','N/A')}"
+
+            power_rows = [
+                ["Parameter","Value"],
+                ["Sample size", n_desc],
+                ["Observed effect size",
+                 f"{_f(effect_v)} ({effect_t})"],
+                ["Significance level (\u03b1)", str(alpha)],
+                ["Achieved statistical power", power_pct],
+                ["Power classification", power_lbl],
+                ["Recommended minimum power", "\u2265\u2009.80 (Cohen, 1988)"]
+            ]
+            st.markdown(html_tbl(power_rows, left_cols={0}),
+                        unsafe_allow_html=True)
+            st.markdown(bar_html, unsafe_allow_html=True)
+
+            if not np.isnan(power_val) and power_val < .80:
+                st.markdown(
+                    '<div class="warn-box">&#9888; <b>Insufficient power.</b> '
+                    'The achieved power is below the conventional threshold of '
+                    '.80. This indicates an elevated risk of Type II error '
+                    '(failing to detect a true effect). Consider increasing '
+                    'the sample size to improve statistical power.</div>',
+                    unsafe_allow_html=True)
+            elif not np.isnan(power_val):
+                st.markdown(
+                    '<div class="info-box">&#10003; <b>Adequate power.</b> '
+                    'The achieved power meets or exceeds the conventional '
+                    'threshold of .80, indicating a satisfactory probability '
+                    'of detecting the observed effect size.</div>',
+                    unsafe_allow_html=True)
+
+            st.markdown(
+                '<p class="note-txt">'
+                'Post-hoc power analysis uses the observed effect size and '
+                'sample size to estimate the probability of correctly rejecting '
+                'H\u2080 given that the effect is real. Power is computed via '
+                'the non-central t-distribution (parametric) or normal '
+                'approximation (non-parametric). '
+                'Reference: Cohen (1988). '
+                '<i>Statistical Power Analysis for the Behavioral Sciences</i> '
+                '(2nd ed.). Lawrence Erlbaum Associates.'
+                '</p>', unsafe_allow_html=True)
+
+        except Exception as e_pw:
+            st.markdown(
+                f'<div class="warn-box">Power analysis unavailable: {e_pw}</div>',
+                unsafe_allow_html=True)
 
     # ── Downloads ──────────────────────────────────────────────────────────────
     st.markdown("---")
