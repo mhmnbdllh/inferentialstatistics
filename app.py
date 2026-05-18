@@ -1303,38 +1303,51 @@ def build_html_report(test_type, R, meta, interps, fig_bytes_list):
     meta_html += "</table>"
 
     # ── assumption summary for HTML ────────────────────────────────────────────
-    assume_rows_html = [["Assumption","Test / Criterion","Result","Decision"]]
+    assume_rows_html = [["Assumption","Test","Statistic","Sig.","Result","Decision"]]
     for nm in R["normality"]:
-        passed = nm["pass"]
-        sw_res = f"SW W\u2009=\u2009{_f(nm['sw_W'])}, p\u2009=\u2009{_p(nm['sw_p'])}"
-        ks_res = f"KS D\u2009=\u2009{_f(nm['ks_D'])}, p\u2009=\u2009{_p(nm['ks_p'])}"
+        passed    = nm["pass"]
+        is_sw_pri = nm["primary_label"] == "Shapiro-Wilk"
+        is_ks_pri = nm["primary_label"] == "Kolmogorov-Smirnov"
         assume_rows_html.append([
             f"Normality \u2014 {nm['label']}",
-            f"{sw_res} | {ks_res} (primary: {nm['primary_label']})",
-            "\u2713 Satisfied" if passed else "\u2717 Violated",
-            "Parametric eligible" if passed else "Non-parametric required"
+            f"Shapiro-Wilk{' \u2605' if is_sw_pri else ''}",
+            f"W\u2009=\u2009{_f(nm['sw_W'])}",
+            _p(nm['sw_p']),
+            "\u2713 Normal" if nm["sw_pass"] else "\u2717 Non-Normal",
+            "Primary criterion" if is_sw_pri else "Supplementary"
+        ])
+        assume_rows_html.append([
+            "",
+            f"KS Lilliefors{' \u2605' if is_ks_pri else ''}",
+            f"D\u2009=\u2009{_f(nm['ks_D'])}",
+            _p(nm['ks_p']),
+            "\u2713 Normal" if nm["ks_pass"] else "\u2717 Non-Normal",
+            "Primary criterion" if is_ks_pri else "Supplementary"
         ])
     if "levene" in R:
         lv2 = R["levene"]
         assume_rows_html.append([
             "Homogeneity of Variance",
-            f"Levene F({lv2['df1']},\u2009{lv2['df2']})\u2009=\u2009{_f(lv2['F'])}, "
-            f"p\u2009=\u2009{_p(lv2['Sig.'])}",
+            "Levene's Test",
+            f"F({lv2['df1']},\u2009{lv2['df2']})\u2009=\u2009{_f(lv2['F'])}",
+            _p(lv2['Sig.']),
             "\u2713 Satisfied" if lv2["equal_var"] else "\u2717 Violated",
             "Equal variances assumed" if lv2["equal_var"]
             else "Welch correction applied"
         ])
     assume_rows_html.append([
-        "Independence of Observations",
-        "By research design (not statistically testable)",
+        "Independence",
+        "Research design",
+        "\u2014", "\u2014",
         "\u2139 Assumed",
         "Must be ensured by design"
     ])
     assume_rows_html.append([
         "Overall Decision",
-        f"Primary criterion: {prim_lbl}",
+        f"Primary: {prim_lbl} (Total N\u2009=\u2009{total_n})",
+        "\u2014", "\u2014",
         "Parametric" if use_p else "Non-parametric",
-        "T-Test family" if use_p else "Wilcoxon / Mann-Whitney U"
+        "T-Test applied" if use_p else "Wilcoxon / Mann-Whitney U"
     ])
 
     # ── non-parametric effect size for HTML ────────────────────────────────────
@@ -1492,10 +1505,12 @@ body{font-family:'DM Sans',sans-serif;background:#f0f4f8;color:#1e293b;font-size
   border-left:4px solid #0284c7;padding:12px 16px;border-radius:0 8px 8px 0;
   font-size:.82rem;color:#0c4a6e;margin:12px 0;line-height:1.75;}
 .rtbl{width:100%;border-collapse:collapse;font-family:'DM Mono',monospace;
-  font-size:.74rem;margin-bottom:6px;}
-.rtbl th{background:#1a1a2e;color:#e2e8f0;padding:9px 13px;text-align:center;
-  font-weight:600;border:1px solid #334155;white-space:nowrap;font-size:.72rem;}
-.rtbl td{padding:7px 13px;border:1px solid #e2e8f0;text-align:right;white-space:nowrap;}
+  font-size:.73rem;margin-bottom:6px;table-layout:fixed;word-wrap:break-word;}
+.rtbl th{background:#1a1a2e;color:#e2e8f0;padding:8px 10px;text-align:center;
+  font-weight:600;border:1px solid #334155;white-space:normal;font-size:.71rem;
+  word-wrap:break-word;}
+.rtbl td{padding:6px 10px;border:1px solid #e2e8f0;text-align:right;
+  white-space:normal;word-wrap:break-word;}
 .rtbl tr.even td{background:#fff;}.rtbl tr.odd td{background:#f8fafc;}
 .rtbl td.left{text-align:left;font-weight:500;background:#f1f5f9!important;}
 .tbl-note{font-size:.73rem;color:#64748b;font-style:italic;margin-top:8px;line-height:1.6;}
@@ -1559,11 +1574,20 @@ body{font-family:'DM Sans',sans-serif;background:#f0f4f8;color:#1e293b;font-size
   <p class="tbl-note">\u1d43 Lilliefors significance correction applied.
   For n\u2009\u2264\u200950: p-value from Lilliefors table (SPSS-equivalent).
   For n\u2009&gt;\u200950: asymptotic approximation.</p>
+  <div class="warn-box" style="margin:10px 0;font-size:.79rem;">
+  <b>Note on KS p-value:</b> The Kolmogorov-Smirnov D statistic is identical
+  to SPSS. The p-value is computed using the Lilliefors significance correction
+  (statsmodels). Minor discrepancies with SPSS p-values may occur due to
+  differences in table interpolation implementations between software packages.
+  This does not affect the normality decision in the vast majority of cases.
+  </div>
   {rec(norm_rec)}
   {sub("Assumption Summary")}
-  {rtbl(assume_rows_html, left_cols={0,1,3})}
-  <p class="tbl-note">Independence of observations cannot be formally tested
-  and must be ensured through appropriate research design.</p>
+  {rtbl(assume_rows_html, left_cols={0,1,2,5})}
+  <p class="tbl-note">&#9605; Primary criterion for normality decision.
+  Independence of observations cannot be formally tested and must be ensured
+  through appropriate research design.
+  References: Razali &amp; Wah (2011); Field (2018).</p>
 </div>
 
 <div class="section">
@@ -1991,52 +2015,89 @@ def main():
                 f'\u2192 <b>Non-parametric analysis applied.</b></div>',
                 unsafe_allow_html=True)
 
+        # ── KS Disclaimer ─────────────────────────────────────────────────────
+        st.markdown(
+            '<div class="info-box" style="margin-top:.6rem;">'
+            '<b>Note on KS p-value:</b> The Kolmogorov-Smirnov D statistic '
+            'is identical to SPSS. The p-value is computed using the Lilliefors '
+            'significance correction (statsmodels). Minor discrepancies with '
+            'SPSS p-values may occur due to differences in table interpolation '
+            'implementations between software packages. This does not affect '
+            'the normality decision in the vast majority of cases.'
+            '</div>',
+            unsafe_allow_html=True)
+
         # ── Assumption Summary Table ───────────────────────────────────────────
         st.markdown('<div class="sec-title">&#9989; Assumption Summary</div>',
                     unsafe_allow_html=True)
-        assume_rows = [["Assumption","Test / Criterion","Result","Decision"]]
+
+        # Build rows — SW and KS on separate rows per variable for readability
+        assume_rows = [["Assumption","Test","Statistic","Sig.","Result","Decision"]]
         for nm in R["normality"]:
-            passed = nm["pass"]
-            sw_res = f"SW W\u2009=\u2009{_f(nm['sw_W'])}, p\u2009=\u2009{_p(nm['sw_p'])}"
-            ks_res = f"KS D\u2009=\u2009{_f(nm['ks_D'])}, p\u2009=\u2009{_p(nm['ks_p'])}"
+            passed    = nm["pass"]
+            is_sw_pri = nm["primary_label"] == "Shapiro-Wilk"
+            is_ks_pri = nm["primary_label"] == "Kolmogorov-Smirnov"
+            result_sw = ('<span class="pass">&#10003; Normal</span>'
+                         if nm["sw_pass"] else '<span class="fail">&#10007; Non-Normal</span>')
+            result_ks = ('<span class="pass">&#10003; Normal</span>'
+                         if nm["ks_pass"] else '<span class="fail">&#10007; Non-Normal</span>')
+            # SW row
             assume_rows.append([
                 f"Normality \u2014 {nm['label']}",
-                f"{sw_res} | {ks_res} (primary: {nm['primary_label']})",
-                ('<span class="pass">&#10003; Satisfied</span>'
-                 if passed else '<span class="fail">&#10007; Violated</span>'),
-                "Parametric eligible" if passed else "Non-parametric required"
+                f"Shapiro-Wilk{'&#9733;' if is_sw_pri else ''}",
+                f"W\u2009=\u2009{_f(nm['sw_W'])}",
+                _p(nm['sw_p']),
+                result_sw,
+                ("Primary criterion" if is_sw_pri else "Supplementary")
             ])
+            # KS row
+            assume_rows.append([
+                "",
+                f"KS Lilliefors{'&#9733;' if is_ks_pri else ''}",
+                f"D\u2009=\u2009{_f(nm['ks_D'])}",
+                _p(nm['ks_p']),
+                result_ks,
+                ("Primary criterion" if is_ks_pri else "Supplementary")
+            ])
+
         if "levene" in R:
             lev = R["levene"]
             assume_rows.append([
                 "Homogeneity of Variance",
-                f"Levene F({lev['df1']},\u2009{lev['df2']})\u2009=\u2009{_f(lev['F'])}, "
-                f"p\u2009=\u2009{_p(lev['Sig.'])}",
+                "Levene's Test",
+                f"F({lev['df1']},\u2009{lev['df2']})\u2009=\u2009{_f(lev['F'])}",
+                _p(lev['Sig.']),
                 ('<span class="pass">&#10003; Satisfied</span>'
                  if lev["equal_var"] else '<span class="fail">&#10007; Violated</span>'),
                 "Equal variances assumed" if lev["equal_var"]
                 else "Welch correction applied"
             ])
+
         assume_rows.append([
-            "Independence of Observations",
-            "By research design (not statistically testable)",
+            "Independence",
+            "Research design",
+            "\u2014",
+            "\u2014",
             '<span style="color:#64748b;">&#8505; Assumed</span>',
             "Must be ensured by design"
         ])
         assume_rows.append([
             "<b>Overall Decision</b>",
-            f"Primary criterion: {prim_lbl}",
+            f"Primary: {prim_lbl_display}",
+            f"Total N\u2009=\u2009{total_n_analysis}",
+            "\u2014",
             f'<b>{"&#10003; Parametric" if use_p else "&#9888; Non-parametric"}</b>',
-            f'<b>{"T-Test family" if use_p else "Wilcoxon / Mann-Whitney U"}</b>'
+            f'<b>{"T-Test applied" if use_p else "Wilcoxon / Mann-Whitney U"}</b>'
         ])
-        st.markdown(html_tbl(assume_rows, left_cols={0,1,3}),
+
+        st.markdown(html_tbl(assume_rows, left_cols={0,1,2,5}),
                     unsafe_allow_html=True)
         st.markdown(
             '<p class="note-txt">'
-            'The assumption summary provides a consolidated overview of all '
-            'statistical prerequisites evaluated prior to inferential testing. '
+            '&#9733; Primary criterion for normality decision. '
             'Independence of observations cannot be formally tested and must '
-            'be ensured through appropriate research design.'
+            'be ensured through appropriate research design. '
+            'References: Razali &amp; Wah (2011); Field (2018).'
             '</p>', unsafe_allow_html=True)
 
     # ── Tab: Descriptives ──────────────────────────────────────────────────────
@@ -2529,33 +2590,148 @@ def main():
     with dc2:
         xbuf = io.BytesIO()
         with pd.ExcelWriter(xbuf, engine="openpyxl") as writer:
+            total_n_xls = R.get("total_n", R["normality"][0]["n"])
+
+            # Sheet 1: Descriptive Statistics
             R["desc"].to_excel(writer, sheet_name="Descriptive Statistics", index=False)
+
+            # Sheet 2: Normality Tests
             norm_rows_xls = []
             for n_item in R["normality"]:
                 norm_rows_xls.append({
-                    "Variable":     n_item["label"], "N": n_item["n"],
-                    "SW W":         n_item["sw_W"],  "SW Sig.":  n_item["sw_p"],
-                    "SW Result":    "Normal" if n_item["sw_pass"] else "Non-Normal",
-                    "KS D":         n_item["ks_D"],  "KS Sig.":  n_item["ks_p"],
-                    "KS Result":    "Normal" if n_item["ks_pass"] else "Non-Normal",
-                    "Recommended Criterion": n_item["primary_label"],
-                    "Decision":     "Normal" if n_item["pass"] else "Non-Normal",
-                    "Recommendation Note": normality_recommendation_plain(n_item["n"])
+                    "Variable":              n_item["label"],
+                    "N (group)":             n_item["n"],
+                    "Total N (analysis)":    total_n_xls,
+                    "SW Statistic (W)":      round(n_item["sw_W"], 3) if not np.isnan(n_item["sw_W"]) else "",
+                    "SW Sig.":               round(n_item["sw_p"], 3) if not np.isnan(n_item["sw_p"]) else "",
+                    "SW Result":             "Normal" if n_item["sw_pass"] else "Non-Normal",
+                    "KS Statistic (D)":      round(n_item["ks_D"], 3) if not np.isnan(n_item["ks_D"]) else "",
+                    "KS Sig.":               round(n_item["ks_p"], 3) if not np.isnan(n_item["ks_p"]) else "",
+                    "KS Result":             "Normal" if n_item["ks_pass"] else "Non-Normal",
+                    "Primary Criterion":     n_item["primary_label"],
+                    "Normality Decision":    "Normal" if n_item["pass"] else "Non-Normal",
+                    "KS Note":               "D statistic identical to SPSS. Minor p-value discrepancy may occur due to differing interpolation implementations.",
+                    "Recommendation":        normality_recommendation_plain(total_n_xls)
                 })
             pd.DataFrame(norm_rows_xls).to_excel(
                 writer, sheet_name="Normality Tests", index=False)
+
+            # Sheet 3: Assumption Summary
+            assume_xls = []
+            for nm in R["normality"]:
+                assume_xls.append({
+                    "Assumption":   f"Normality - {nm['label']}",
+                    "Test":         "Shapiro-Wilk",
+                    "Statistic":    f"W = {_f(nm['sw_W'])}",
+                    "Sig.":         _p(nm['sw_p']),
+                    "Result":       "Normal" if nm["sw_pass"] else "Non-Normal",
+                    "Role":         "Primary criterion" if nm["primary_label"] == "Shapiro-Wilk" else "Supplementary",
+                    "Decision":     "Parametric eligible" if nm["pass"] else "Non-parametric required"
+                })
+                assume_xls.append({
+                    "Assumption":   f"Normality - {nm['label']}",
+                    "Test":         "KS Lilliefors",
+                    "Statistic":    f"D = {_f(nm['ks_D'])}",
+                    "Sig.":         _p(nm['ks_p']),
+                    "Result":       "Normal" if nm["ks_pass"] else "Non-Normal",
+                    "Role":         "Primary criterion" if nm["primary_label"] == "Kolmogorov-Smirnov" else "Supplementary",
+                    "Decision":     "Parametric eligible" if nm["pass"] else "Non-parametric required"
+                })
+            if "levene" in R:
+                lv_xls = R["levene"]
+                assume_xls.append({
+                    "Assumption":   "Homogeneity of Variance",
+                    "Test":         "Levene's Test",
+                    "Statistic":    f"F({lv_xls['df1']},{lv_xls['df2']}) = {_f(lv_xls['F'])}",
+                    "Sig.":         _p(lv_xls["Sig."]),
+                    "Result":       "Satisfied" if lv_xls["equal_var"] else "Violated",
+                    "Role":         "Required for t-test",
+                    "Decision":     "Equal variances assumed" if lv_xls["equal_var"] else "Welch correction applied"
+                })
+            assume_xls.append({
+                "Assumption":   "Independence of Observations",
+                "Test":         "Research design",
+                "Statistic":    "N/A", "Sig.": "N/A",
+                "Result":       "Assumed",
+                "Role":         "Prerequisite",
+                "Decision":     "Must be ensured by design"
+            })
+            pd.DataFrame(assume_xls).to_excel(
+                writer, sheet_name="Assumption Summary", index=False)
+
+            # Sheet 4: Paired Correlation (optional)
             if "correlation" in R:
                 R["correlation"].to_excel(
                     writer, sheet_name="Paired Correlation", index=False)
+
+            # Sheet 5: Levene Test (optional)
             if "levene" in R:
-                pd.DataFrame([R["levene"]]).to_excel(
-                    writer, sheet_name="Levene Test", index=False)
+                lv_df = pd.DataFrame([R["levene"]])
+                lv_df.to_excel(writer, sheet_name="Levene Test", index=False)
+
+            # Sheet 6: Parametric Results
             pd.DataFrame([R["parametric"]]).to_excel(
                 writer, sheet_name="Parametric Results", index=False)
+
+            # Sheet 7: Non-Parametric Results
             np_export = dict(R["nonparametric"])
             np_export["U"] = format_u(np_export.get("U", float("nan")))
             pd.DataFrame([np_export]).to_excel(
                 writer, sheet_name="Non-Parametric Results", index=False)
+
+            # Sheet 8: Effect Size
+            try:
+                cfg_s_xls = st.session_state.get("stats_cfg", {})
+                df_xls    = st.session_state.get("stats_df", pd.DataFrame())
+                es_rows_xls = []
+                np_r_xls = R["nonparametric"]
+                if test_type == "Independent-Sample T-Test" and not df_xls.empty:
+                    g1_xls = df_xls[df_xls[cfg_s_xls["grp_col"]]==cfg_s_xls["g1"]][cfg_s_xls["dep_col"]].dropna().values
+                    g2_xls = df_xls[df_xls[cfg_s_xls["grp_col"]]==cfg_s_xls["g2"]][cfg_s_xls["dep_col"]].dropna().values
+                    r_xls  = rank_biserial_mannwhitney(g1_xls, g2_xls)
+                else:
+                    r_xls = np.nan
+                es_rows_xls.append({
+                    "Effect Size":   "Cohen's d (parametric)",
+                    "Value":         round(R["parametric"].get("cohens_d", float("nan")), 3),
+                    "Interpretation": effect_label_d(R["parametric"].get("cohens_d", 0)),
+                    "Reference":     "Cohen (1988)"
+                })
+                es_rows_xls.append({
+                    "Effect Size":   "Rank-Biserial r (non-parametric)",
+                    "Value":         round(r_xls, 3) if not np.isnan(r_xls) else "N/A",
+                    "Interpretation": effect_label_r_nonparam(r_xls) if not np.isnan(r_xls) else "N/A",
+                    "Reference":     "Kerby (2014)"
+                })
+                pd.DataFrame(es_rows_xls).to_excel(
+                    writer, sheet_name="Effect Size", index=False)
+            except Exception:
+                pass
+
+            # Sheet 9: Power Analysis
+            try:
+                pw_xls = compute_power(test_type, R, alpha)
+                pd.DataFrame([{
+                    "Test":                 test_type,
+                    "Sample Size":          pwr_n if "n1" not in pw_xls else f"n1={pw_xls['n1']}, n2={pw_xls['n2']}",
+                    "Effect Size":          round(pw_xls.get("effect_size", float("nan")), 3),
+                    "Effect Type":          pw_xls.get("effect_type", ""),
+                    "Alpha":                alpha,
+                    "Achieved Power":       round(pw_xls.get("power", float("nan")), 3),
+                    "Power Classification": pw_xls.get("power_label", ""),
+                    "Recommended Minimum":  0.80,
+                    "Reference":            "Cohen (1988)"
+                }]).to_excel(writer, sheet_name="Power Analysis", index=False)
+            except Exception:
+                pass
+
+            # Sheet 10: Interpretation
+            interp_clean = [line.replace("<b>","").replace("</b>","")
+                            .replace("<i>","").replace("</i>","")
+                            for line in interps]
+            pd.DataFrame({"Interpretation": interp_clean}).to_excel(
+                writer, sheet_name="Interpretation", index=False)
+
         xbuf.seek(0)
         st.download_button(
             "&#128202; Excel Workbook",
